@@ -38,8 +38,12 @@
 ## 第 4 步 · 确定性再生
 - `foldlib.regen_digest()` 再生 `persona/threads/DIGEST.md`
   （你只维护各线头的 `digest:` 字段，拼装排序截断是代码的事）。
+- 重写 `persona/SNAPSHOT.md`（人格速览：性格/关系结构/人际风格/关系协议的最新结论；
+  SessionStart 注入依赖它——只写结构性观察，不复制人物索引已有事实）。
 
 ## 第 5 步 · 三闸门 + KPI（任何 error 当夜处置，不处置不推进游标）
+- 维护：`python eval/build_index.py`（召回索引增量）与每周
+  `python eval/backup.py`（原始层备份：manifest + sha256 + 保留 8 代）。
 - `python eval/check_events.py`（原始层完整性 + 密钥兜底）
 - `python eval/audit_persona.py`（档案契约 + 全库密钥扫描 + 账本合法性）
 - `python eval/check_injection.py`（接收方读链：写侧成功 ≠ 接收方可见）

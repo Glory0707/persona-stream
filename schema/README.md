@@ -34,7 +34,7 @@ JSONL，一行一事件。公共字段：`id`（12位hex）、`ts`（ISO8601 含
 - `core.md`：手工区（本人确认制）+ `<!-- AUTO:BEGIN -->`/`<!-- AUTO:END -->` 自动区（夜间任务唯一可写区）
 - `SNAPSHOT.md`：人格速览（性格/人物/人际风格/关系协议/当夜快照），SessionStart 注入用；夜间任务维护
 - `policies/<域>.yaml`：`id / domain / rules[]{when, tendency, confidence, evidence[], counter_evidence[], updated, invalidated?}`；被推翻的规则由 foldlib.invalidate_rule 写 `invalidated: "日期"` 软失效保留原文（不进 core 自动区）；归档进 `policies/_archive.yaml`
-- `beliefs/<话题>.yaml`：`topic / versions[]{v, date, claim, trigger} / current / tension`（言行矛盾记录，不仲裁）
+- `beliefs/<话题>.yaml`：`topic / versions[]{v, date, claim, trigger} / current / tension`（言行矛盾记录，不仲裁）；版本追加走 `foldlib.upsert_belief_version`
 - `threads/`：线头条目，公共字段 `id/opened/topic/detail/evidence[]`；正文块是 detail 块标量内以 `；【` 开头的行分段。生命周期四级：
   - `open`：必须有 `last_seen`（超 14 天未更新被自检提示复核并入问题池）与 **`digest:`**（≤32 字摘要，DIGEST 确定性再生的唯一语义源）
   - `dormant`（遗忘）：open 超 21 天未动由 `foldlib.sweep_threads` 置入，须带 `dormant:` 日期；不进 DIGEST/注入，再折叠或 touch/related/paths 触碰自动唤醒
