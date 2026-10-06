@@ -175,7 +175,7 @@ examples/    hook configuration examples
 ## Status & scope
 
 This is the author's own production pipeline, extracted: the private deployment
-has been running nightly since 2025-09 over thousands of real events. What is
+has been running nightly since 2026-09 over thousands of real events. What is
 open-source is the **framework** (collector, fold library, gates, schema,
 tests, demo); the author's persona archive and event stream are private and
 are not part of this repository. Issues and PRs welcome within that scope —
