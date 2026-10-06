@@ -110,3 +110,22 @@ def test_bytes_skip_and_rebuild(tmp_path):
     assert build_index.search("追加的新行", db=db)
     # rebuild=True 忽略 bytes 记录全量重建
     assert build_index.build(data_dir=str(data_dir), db=db, quiet=True, rebuild=True) == 2
+
+
+def test_truncated_file_reindexes_without_ghosts(tmp_path):
+    """append-only 被破坏（截断）→ 该文件整文件重索引：幽灵行清除、幸存事件保留。
+    2026-10-07 测试员轮实测：旧行为下幽灵行随 meta'最新'标记永久存留。"""
+    data = tmp_path / "data"; (data / "index").mkdir(parents=True)
+    db = data / "index" / "events.db"
+    ev = data / "events-20260101.jsonl"
+    rows = ['{"id":"a%011d","ts":"2026-01-01T0%d:00:00+08:00","hook":"UserPromptSubmit",'
+            '"session":"s","type":"prompt","text":"第%d条内容数据"}' % (i, i, i)
+            for i in range(5)]
+    ev.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    build_index.build(data_dir=str(data), db=str(db), quiet=True)
+    assert len(build_index.search("条内容", db=str(db))) == 5
+    kept = ev.read_text(encoding="utf-8").splitlines()[:2]
+    ev.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    build_index.build(data_dir=str(data), db=str(db), quiet=True)
+    ids = sorted(r["id"] for r in build_index.search("条内容", db=str(db)))
+    assert ids == ["a00000000000", "a00000000001"], ids

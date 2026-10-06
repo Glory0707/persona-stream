@@ -177,7 +177,7 @@ eval/        check_events · audit_persona · check_injection · build_index
              search_events · metrics · backup · plot_kpi · leak_scan
 synthetic/   generate.py · distill_demo.py · demo.py   ← start here
 schema/      README.md — the data contract (authoritative)
-tests/       146 regression tests (pytest, no network, no real data)
+tests/       147 regression tests (pytest, no network, no real data)
 examples/    hook configuration examples
 ```
 

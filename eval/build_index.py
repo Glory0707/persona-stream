@@ -71,6 +71,25 @@ def _event_text(obj):
     return "\n".join(x for x in parts if x)
 
 
+def _scan(path, start, name):
+    """单遍扫描：行号即新游标。返回 (rows, total)——rows 只收 start 之后的行。"""
+    rows, total = [], start
+    with open(path, "rb") as f:
+        for ln, raw in enumerate(f, 1):
+            total = ln
+            if ln <= start:
+                continue
+            try:
+                obj = json.loads(raw.decode("utf-8", "replace"))
+            except Exception:
+                continue
+            txt = _event_text(obj)
+            if txt:
+                rows.append((txt, obj.get("id") or "", obj.get("ts") or "",
+                             name, ln, obj.get("type") or ""))
+    return rows, total
+
+
 def build(data_dir=DATA, db=DB_PATH, rebuild=False, quiet=False, optimize_at=500):
     """增量构建。optimize_at：新索引行数达到阈值才跑 FTS5 optimize——大索引上
     optimize 耗秒级（实测 65K 行 ~10s），只配夜间批量；会话启动的小增量构建跳过。"""
@@ -94,22 +113,14 @@ def build(data_dir=DATA, db=DB_PATH, rebuild=False, quiet=False, optimize_at=500
             fsize = os.path.getsize(path)
         except OSError:
             continue
-        rows, total = [], start  # 单遍扫描：行号即新游标，不再回头数第二遍
         if not rebuild and known_bytes == fsize and start > 0:
             continue  # append-only：字节数未变 → 无新行，整文件跳过
-        with open(path, "rb") as f:
-            for ln, raw in enumerate(f, 1):
-                total = ln
-                if ln <= start:
-                    continue
-                try:
-                    obj = json.loads(raw.decode("utf-8", "replace"))
-                except Exception:
-                    continue
-                txt = _event_text(obj)
-                if txt:
-                    rows.append((txt, obj.get("id") or "", obj.get("ts") or "",
-                                 name, ln, obj.get("type") or ""))
+        rows, total = _scan(path, start, name)
+        if known_bytes not in (-1, fsize) and total <= start:
+            # append-only 被破坏（截断/原地改写，2026-10-07 测试员轮实测：旧行变幽灵且
+            # meta 已标"最新"会永久存留）→ 删该文件全部旧行整文件重索引
+            conn.execute("DELETE FROM events WHERE file=?", (name,))
+            rows, total = _scan(path, 0, name)
         if rows:
             conn.executemany("INSERT INTO events VALUES (?,?,?,?,?,?)", rows)
         conn.execute("INSERT INTO meta(file, lines, bytes) VALUES(?,?,?) "
