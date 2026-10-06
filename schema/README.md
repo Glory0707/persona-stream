@@ -60,9 +60,9 @@ JSONL，一行一事件。公共字段：`id`（12位hex）、`ts`（ISO8601 含
 - **事件索引 `data/index/events.db`**（2026-10-02 起，仅本地 gitignore）：SQLite FTS5（trigram 分词，无嵌入），`eval/build_index.py` 随夜间维护增量构建，`eval/search_events.py "关键词"` 检索；覆盖 prompt.text / stop.reply / payload。
 - **`distiller/foldlib.py`**：夜间折叠唯一写入口（行为规则见 FOLD_RULES §11）——写前查重、超限（32KB）报错附块清单、写前 YAML 预检、原子落盘、全部变更器持侧车锁；**禁止临时脚本字符串切片**。
 - **注入读链验证 `eval/check_injection.py`**：夜间第三闸门——重建注入全文断言 DIGEST/线头 digest/协议 when/人名/资料路径在接收方可见（写侧成功≠接收方可见）。
-- `eval/kpi.jsonl` 每行须带 `kind`：`nightly`(夜间折叠，signals=折叠事件数) / `mining`(离线深挖，原始扫描量写 note、signals 记 0) / `maint`(工程维护)——趋势图只统计 nightly；每行须含 date/kind/signals/pruned，2026-10-06 起 nightly 行还须含 `coverage`/`backlink`（`eval/metrics.py` 产出），rate 须与 corrections/signals 相符，同日同 signals 的 nightly 重复行会被自检判 ERROR。
+- `eval/kpi.jsonl` 每行须带 `kind`：`nightly`(夜间折叠，signals=折叠事件数) / `mining`(离线深挖，signals=实际折叠引用的事件数、原始扫描量写 note) / `maint`(工程维护)——趋势图只统计 nightly；每行须含 date/kind/signals/pruned，2026-10-06 起 nightly 行还须含 `coverage`/`backlink`（`eval/metrics.py` 产出），rate 须与 corrections/signals 相符，同日同 signals 的 nightly 重复行会被自检判 ERROR。
 - 质检脚本：`eval/audit_persona.py`（档案+全仓库密钥扫描）、`eval/check_events.py`（原始事件流完整性/密钥兜底/游标一致性）、`eval/backup.py`（每周备份+sha256 清单+保留 8 代）。
-- `collector_err.log`（采集错误，超 256KB 自动轮转一代）、`distill_err.log`（蒸馏错误）、`session_state/`（会话状态）。`data/` 整体 gitignore；蒸馏中间产物（`data/_*`、临时脚本）折叠后即删（见 AUTOMATION_PROMPT 第 6 步）。
+- `collector_err.log`（采集错误，超 256KB 自动轮转一代）、`distill_err.log`（蒸馏错误）。`data/` 整体 gitignore；蒸馏中间产物（`data/_*`、临时脚本）折叠后即删（见 AUTOMATION_PROMPT 第 6 步）。
 
 ## 7. 长文本字段的 YAML 写法（硬约束）
 

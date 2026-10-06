@@ -71,7 +71,7 @@
 
 - 档案变更**只准**经 `distiller/foldlib.py`（append_detail / set_digest /
   touch_thread / add_related / add_paths / invalidate_block / invalidate_rule /
-  regen_digest / sweep_threads / ledger_append）。它负责写前查重、YAML 预检、
+  regen_digest / sweep_threads / upsert_belief_version / ledger_append）。它负责写前查重、YAML 预检、
   原子落盘、侧车锁与账本。**禁止临时脚本字符串切片**——历史上两次档案
   YAML 损坏都由此而来。
 - 长文本字段一律 YAML 块标量（`|-`）：裸标量里的英文引号/冒号会炸整个文件，
