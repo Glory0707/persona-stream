@@ -31,8 +31,9 @@ The protocol that matters:
 3. **Fix the entry point, not just the instance**: if a secret reached the
    event stream, extend the ingest redaction (`collector/collect.py
    SECRET_SUBS`) so the *shape* is caught next time, then let
-   `eval/check_events.py` (raw layer) and `eval/audit_persona.py
-   SECRET_PATTERNS` (tracked files) confirm the clean state.
+   `eval/check_events.py` (raw layer) and `eval/audit_persona.py`
+   (tracked files; patterns and the synthetic-fixture allowlist live in
+   `eval/secretscan.py`, shared by all three scanners) confirm the clean state.
 4. **Gates are gates**: if `audit_persona` reports a secret-shaped string in
    a tracked file, the nightly pipeline must treat it as a hard failure
    (exit 1) — do not weaken the pattern to get green.

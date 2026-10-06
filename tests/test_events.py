@@ -49,14 +49,19 @@ def test_detects_bad_json_dup_id_missing_field(tmp_path):
 
 
 def test_detects_unredacted_secret_but_ignores_synthetic(tmp_path):
+    # 豁免名单为全系统单一来源（eval/secretscan.SYNTHETIC）：登记过的合成夹具在原始层同样豁免
     write_event(tmp_path, "events-20260909.jsonl",
                 base_event("a1", "key 0123456789abcdef0123456789abcdef.DEMOnotareal99"))
     write_event(tmp_path, "events-20260909.jsonl",
                 base_event("a2", "fixture sk-abcdefghijklmnopqrstuvwx"))
+    # 未登记的真实形态照样报（动态拼串：本测试文件内容会被采集层录进事件流，不能以完整字面量出现）
+    leak = "0123456789abcdef0123456789abcdef." + "Qq7Wm3Rt8Yu5"
+    write_event(tmp_path, "events-20260909.jsonl", base_event("a3", "key " + leak))
     m = load_checker()
     errors, _, _ = m.scan_events(str(tmp_path))
     assert any("BigModel" in e for e in errors)
     assert not any("sk-abc" in e for e in errors)
+    assert not any("DEMOnotareal99" in e for e in errors)
 
 
 def test_cursor_overrun_flagged(tmp_path):

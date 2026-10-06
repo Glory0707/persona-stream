@@ -386,6 +386,26 @@ def test_sweep_auto_closes_long_dormant(tmp_path):
     assert "重开即续线" in s and "closure:" in s
     row = json.loads(led.read_text(encoding="utf-8").splitlines()[0])
     assert row["action"] == "prune" and "closed" in row["new_summary"]
+
+
+def test_sweep_closes_hand_edited_dormant_with_stale_closed_field(tmp_path):
+    """手改复开的线头（status:dormant + dormant 日期在，但残留旧 closed 行且无 closure）
+    再闭合：closed 日期刷新、closure 补插，全程不崩（回归：closure 插入锚点）。"""
+    import datetime
+    today = datetime.date.today().isoformat()
+    d = tmp_path / "threads"
+    d.mkdir()
+    p = d / "odd.yaml"
+    p.write_text(
+        'id: odd-thing\nstatus: dormant\nopened: "2026-08-01"\nlast_seen: "2026-08-01"\n'
+        'dormant: "2026-08-05"\nclosed: "2026-09-01"\ntopic: t\n'
+        'detail: |-\n  【8-1：x】y\nevidence: []\n',
+        encoding="utf-8")
+    res = foldlib.sweep_threads(threads_dir=str(d), ledger_path=str(tmp_path / "led.jsonl"))
+    assert res == {"dormant": [], "closed": ["odd-thing"]}
+    s = p.read_text(encoding="utf-8")
+    assert 'closed: "%s"' % today in s and 'closed: "2026-09-01"' not in s
+    assert "closure:" in s and "重开即续线" in s
     # 闭合后不在 digest_plan 里（closed 契约），audit 口径也兼容
     kept, _sk, _dr = foldlib.digest_plan(str(d))
     assert kept == []

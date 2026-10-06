@@ -27,45 +27,18 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import secretscan  # noqa: E402  密钥模式/豁免名单单一来源（eval/secretscan.py）
+
 ROOT = os.environ.get("PERSONA_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PERSONA = os.path.join(ROOT, "persona")
 errors, warns = [], []
 
-# ---------- 密钥模式（与采集层脱敏面保持一致，另含历史上真实泄露过的 JWT / id.secret 形态） ----------
-SECRET_PATTERNS = [
-    (r"sk-[A-Za-z0-9_\-]{20,}", "API key (sk-…)"),
-    (r"hf_[A-Za-z0-9]{20,}", "Hugging Face token"),
-    (r"gh[pousr]_[A-Za-z0-9]{20,}", "GitHub token"),
-    (r"ark-[0-9a-fA-F\-]{20,}", "火山 ark key"),
-    (r"AKID[A-Za-z0-9]{13,}", "腾讯 AKID"),
-    (r"eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}", "JWT"),
-    (r"(?<![0-9a-f])[0-9a-f]{32}\.[A-Za-z0-9]{12,}(?![A-Za-z0-9])", "BigModel id.secret key"),
-    (r"Bearer\s+[A-Za-z0-9._\-]{16,}", "Bearer token"),
-    (r"(?i)(api[_-]?key|token|secret|password|passwd)\s*[=:]\s*[\"']?[A-Za-z0-9_.\-]{12,}",
-     "明文凭据串"),
-]
-# tests/ 同样扫描（2026-09-10 消除盲区：此前真实形态密钥曾在 tests/ 夹具里躲过全部扫描，
-# GitHub push protection 反而拦到了）；tests 里的合成夹具字符串由 SYNTHETIC_SECRETS 豁免，
-# 新增夹具时必须同步登记（含 .pytest_cache 的 nodeids 缓存，同样会夹带夹具字符串）
+# 别名保留：inject._recall_clean 与单测经此引用密钥扫描（实现已收口到 secretscan）
+SECRET_PATTERNS = secretscan.PATTERNS
+SYNTHETIC_SECRETS = secretscan.SYNTHETIC
+scan_text_for_secrets = secretscan.scan_text
 SECRET_SCAN_SKIP_DIRS = (".git", ".pytest_cache", "data")
-SYNTHETIC_SECRETS = (
-    # 经典合成夹具（tests/ 沿用）
-    "sk-abcdefghijklmnopqrstuvwx", "sk-abcdefghijklmnopqrst",
-    "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456",
-    "abc123def456abc123def456abc123de.ns2aiiHhdj50rrOR",
-    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig1234567",
-    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghij",
-    # tests/ 其余合成值（正则可命中，须逐一登记豁免）
-    "sk-Zx9Lm2Pq7Rv4Tn8Wk3Yc6BhF0Ds5Ja",
-    "hf_DEMOfake0000000000000000000000000000",
-    "ark-ffeeddccbbaa0011223344556677889900",
-    "ark-ffeeddccbbaa0011223344556677889900ff",
-    "0123456789abcdef0123456789abcdef.DEMOfakesecret",
-    "0123456789abcdef0123456789abcdef.DEMOnotareal99",
-    "Bearer abcdefghijklmnopqrst",
-    "token=abc123def456",
-    "token=supersecret123",
-)
 
 
 def rel(p):
@@ -88,28 +61,26 @@ def check_people():
     for k, v in collections.Counter(flat).items():
         if v > 1:
             errors.append(f"people.yaml 人名重复 {v} 次：{k}（应合并为一条）")
+    if not names:
+        errors.append("people.yaml 无任何条目")
+    # 单遍循环：条目契约 + 注入索引总预算（防再次膨胀；超限压缩 brief 而不是删人）
+    idx_len = 0
     for blk in re.split(r"\n  - name: ", s)[1:]:
-        nm = blk.split("\n")[0][:40]
+        nm = blk.split("\n")[0]
+        idx_len += len(nm.strip()) + 4
         if re.search(r"(已各自独立建档|见上方条目|见下方条目)", blk):
-            errors.append(f"people.yaml 冗余指针条目应删除：{nm}")
+            errors.append(f"people.yaml 冗余指针条目应删除：{nm[:40]}")
         # brief 契约（2026-09-10）：注入只发 name+brief 索引，缺 brief 的条目在其他会话里没有画像
         mb = re.search(r"^\s+brief:\s*(.+)$", blk, re.M)
         if not mb:
-            errors.append(f"people.yaml 条目缺 brief（注入索引必需，≤150 字单行）：{nm}")
+            errors.append(f"people.yaml 条目缺 brief（注入索引必需，≤150 字单行）：{nm[:40]}")
         else:
             bl = mb.group(1).strip()
+            idx_len += len(bl)
             if bl.startswith("|"):
-                errors.append(f"people.yaml brief 必须单行普通标量（不要块标量）：{nm}")
+                errors.append(f"people.yaml brief 必须单行普通标量（不要块标量）：{nm[:40]}")
             elif len(bl) > 160:
-                warns.append(f"people.yaml brief 过长（{len(bl)} 字>160，占用注入预算）：{nm}")
-    if not names:
-        errors.append("people.yaml 无任何条目")
-    # 注入索引总预算（防再次膨胀；超限压缩 brief 而不是删人）
-    idx_len = 0
-    for blk in re.split(r"\n  - name: ", s)[1:]:
-        nm = blk.split("\n")[0].strip()
-        mb = re.search(r"^\s+brief:\s*(.+)$", blk, re.M)
-        idx_len += len(nm) + len(mb.group(1).strip() if mb else "") + 4
+                warns.append(f"people.yaml brief 过长（{len(bl)} 字>160，占用注入预算）：{nm[:40]}")
     if idx_len > 4500:
         warns.append(f"people.yaml 注入索引约 {idx_len} 字（预算 4500）——压缩 brief 或合并条目")
 
@@ -145,7 +116,7 @@ def check_threads():
     import datetime
     today = datetime.date.today()
     files = sorted(glob.glob(os.path.join(PERSONA, "threads", "*.yaml")))
-    open_count = 0
+    open_count = dormant_count = 0
     for f in files:
         try:
             s = open(f, encoding="utf-8").read()
@@ -173,6 +144,7 @@ def check_threads():
             if not re.search(r"^digest:\s*\S", s, re.M):
                 warns.append(f"{rel(f)} open 线头缺 digest 字段（DIGEST 确定性再生的语义源，补上后由 foldlib.regen_digest 统一渲染）")
         elif st.group(1) == "dormant":
+            dormant_count += 1
             # 休眠线头（foldlib.sweep_threads 产出，2026-10-05）：不进 DIGEST/注入，再折叠自动唤醒
             if not re.search(r'^dormant:\s*"?[\d-]+', s, re.M):
                 errors.append(f"{rel(f)} dormant 线头缺 dormant 日期（应由 sweep_threads 写入）")
@@ -207,8 +179,6 @@ def check_threads():
                     warns.append(f"{rel(f)} paths 目录不存在（使用时回写或删除）：{p}")
     if open_count > 10:
         warns.append(f"open 线头 {open_count} 条（FOLD_RULES §-1 软上限 10）——夜间任务应闭合/归档最弱者")
-    dormant_count = sum(1 for f in files
-                        if re.search(r"^status:\s*dormant", open(f, encoding="utf-8").read(), re.M))
     if dormant_count > 8:
         warns.append(f"dormant 线头 {dormant_count} 条（软上限 8）——foldlib sweep 60 天自动闭合"
                      f"兜底前，夜间任务应先复核可否直接关闭")
@@ -262,9 +232,9 @@ def check_yaml():
 
 
 def check_privacy():
-    hard = [(r"sk-[A-Za-z0-9_\-]{16,}", "API key"), (r"ghp_[A-Za-z0-9]{20,}", "GitHub token"),
-            (r"\b\d{17}[\dXx]\b", "身份证"), (r"\b\d{16,19}\b", "银行卡号"),
-            (r"(?i)password\s*[=:]\s*\S{4,}", "明文密码")]
+    # 密钥形态复用统一扫描（此前这里内联过第二份 sk-/ghp_/密码正则，口径漂移源）；
+    # 身份证/银行卡是隐私层独有面。persona 同时被 check_repo_secrets 覆盖，双闸从两个角度钉
+    hard = [(r"\b\d{17}[\dXx]\b", "身份证"), (r"\b\d{16,19}\b", "银行卡号")]
     soft = [(r"\b1[3-9]\d{9}\b", "手机号"), (r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "邮箱")]
     for f in glob.glob(os.path.join(PERSONA, "**", "*"), recursive=True):
         if os.path.isdir(f):
@@ -273,6 +243,8 @@ def check_privacy():
             s = open(f, encoding="utf-8").read()
         except Exception:
             continue
+        for name in set(scan_text_for_secrets(rel(f), s)):
+            errors.append(f"{rel(f)} 含{name}明文（必须脱敏）")
         for p, name in hard:
             if re.search(p, s):
                 errors.append(f"{rel(f)} 含{name}明文（必须脱敏）")
@@ -379,8 +351,7 @@ def check_repo_secrets():
             text = raw.decode("utf-8", "replace")
         except Exception:
             continue
-        for s in SYNTHETIC_SECRETS:
-            text = text.replace(s, "")
+        text = secretscan.strip_synthetic(text)
         for name in scan_text_for_secrets(rel(f), text):
             errors.append(f"{rel(f)} 含明文{name}（入库文件禁止密钥；历史泄露见 docs/SECURITY.md）")
 

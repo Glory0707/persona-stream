@@ -20,9 +20,14 @@ import sys
 ROOT = os.environ.get("PERSONA_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "distiller"))  # 代码根
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))  # eval/（secretscan）
 import foldlib  # noqa: E402  事件流唯一扫描口径（iter_events）
+import secretscan  # noqa: E402  合成夹具豁免名单单一来源
 
-# 与 audit_persona.SECRET_PATTERNS 同口径（原始层兜底，宁可误报人工确认）
+# 原始层保守检测面（原始层专用，比 secretscan.PATTERNS 入库层窄）：本层兜底的是
+# "采集层应脱敏而漏脱敏"的形态；把 Bearer/凭据串等宽口径下沉到这里会在历史语料上
+# 产生大量散文误报（"密码登录"类），66K 事件实测裁决过，勿"对齐"。
+# 采集层脱敏面另见 collector/collect.py SECRET_SUBS（第三份契约：激进替换）。
 SECRET_PATTERNS = [
     (r"sk-[A-Za-z0-9_\-]{20,}", "API key"),
     (r"hf_[A-Za-z0-9]{20,}", "Hugging Face token"),
@@ -33,9 +38,7 @@ SECRET_PATTERNS = [
     (r"(?<![0-9a-f])[0-9a-f]{32}\.[A-Za-z0-9]{12,}(?![A-Za-z0-9])", "BigModel id.secret"),
 ]
 REQUIRED = ("id", "ts", "hook", "session")
-SYNTHETIC = ("sk-abcdefghijklmnopqrstuvwx", "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456",
-             "sk-abcdefghijklmnopqrst", "abc123def456abc123def456abc123de.ns2aiiHhdj50rrOR",
-             "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig1234567")
+SYNTHETIC = secretscan.SYNTHETIC
 
 
 def scan_events(data_dir=DATA):

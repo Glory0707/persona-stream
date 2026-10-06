@@ -745,8 +745,8 @@ def sweep_threads(threads_dir=THREADS_DIR, day=None, dormant_days=DORMANT_DAYS,
             st = front_field(s, "status")
             if st not in ("open", "dormant"):
                 continue
+            old_digest = front_field(s, "digest") or ""
             if st == "open":
-                old_digest = front_field(s, "digest") or ""
                 new_s = _set_front_line(s, "status", "status: dormant")
                 marker = 'dormant: "%s"' % day
                 m = re.search(r"^last_seen:.*$", new_s, re.M)
@@ -759,19 +759,21 @@ def sweep_threads(threads_dir=THREADS_DIR, day=None, dormant_days=DORMANT_DAYS,
                 summary = "dormant(%s，open 超 %d 天未动)" % (day, dormant_days)
                 out["dormant"].append(tid)
             else:
-                old_digest = front_field(s, "digest") or ""
                 new_s = _set_front_line(s, "status", "status: closed")
                 closure = "dormant 超 %d 天无活动自动闭合（%s）；重开即续线" % (close_days, day)
-                m = re.search(r"^dormant:.*$", new_s, re.M)
-                ins = 'closed: "%s"\nclosure: %s\n' % (day, "'" + closure.replace("'", "''") + "'")
-                if re.search(r"^closed:.*$", new_s, re.M):
+                cl_line = "closure: %s" % ("'" + closure.replace("'", "''") + "'")
+                mc = re.search(r"^closed:.*$", new_s, re.M)
+                anchor = re.search(r"^dormant:.*$", new_s, re.M) or mc  # 锚点行：新字段插其后
+                if mc:
                     new_s = _set_front_line(new_s, "closed", 'closed: "%s"' % day)
                     if not re.search(r"^closure:.*$", new_s, re.M):
-                        new_s = new_s[:m.end()] + "\n" + ins.split("\n", 1)[1] + new_s[m.end():]
-                elif m:
-                    new_s = new_s[:m.end()] + "\n" + ins + new_s[m.end():]
+                        new_s = new_s[:anchor.end()] + "\n" + cl_line + new_s[anchor.end():]
+                elif anchor:
+                    new_s = new_s[:anchor.end()] + "\n" \
+                        + 'closed: "%s"' % day + "\n" + cl_line + new_s[anchor.end():]
                 else:
-                    new_s = new_s.rstrip("\n") + "\n" + ins
+                    new_s = new_s.rstrip("\n") + "\n" \
+                        + 'closed: "%s"' % day + "\n" + cl_line + "\n"
                 summary = "closed(%s，dormant 超 %d 天自动闭合)" % (day, close_days)
                 out["closed"].append(tid)
             if not _yaml_ok(new_s):
