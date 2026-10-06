@@ -520,3 +520,55 @@ def test_archive_stub_evidence_ignores_prose_numbers(tmp_path):
     import re
     ev = re.search(r"^evidence: \[(.*?)\]", stub, re.M).group(1)
     assert "aaaaaaaaaaaa" in ev and "202510487008" not in ev
+
+
+# ---------- upsert_belief_version ----------
+
+BELIEF_TPL = (
+    "# 信念链：测试话题\ntopic: 测试话题\nversions:\n"
+    "  - v: 1\n    date: \"2026-09-01\"\n    claim: |-\n      初版结论：包含冒号与\"引号\"\n"
+    "    trigger: [\"aaaaaaaaaaaa\"]\n"
+    "current: 1\ntension: []\n"
+)
+
+
+def test_belief_version_new_file_skeleton(tmp_path):
+    f = tmp_path / "思维模式.yaml"
+    nv = foldlib.upsert_belief_version(
+        str(f), "立论先问核心出发点（ev: bbbbbbbbbbbb）", trigger=["bbbbbbbbbbbb", "sunday5-x"],
+        day="2026-10-07", topic="思维模式与价值张力", header="# 信念：思维模式")
+    assert nv == 1
+    obj = yaml.safe_load(f.read_text(encoding="utf-8"))
+    assert obj["topic"] == "思维模式与价值张力" and obj["current"] == 1
+    assert obj["versions"][0]["trigger"] == ["bbbbbbbbbbbb", "sunday5-x"]
+    assert obj["versions"][0]["claim"].startswith("立论先问核心出发点")
+
+
+def test_belief_version_appends_and_updates_current(tmp_path):
+    f = _mk(tmp_path, {"语言习惯.yaml": BELIEF_TPL}) / "语言习惯.yaml"
+    nv = foldlib.upsert_belief_version(str(f), "新结论 v2：又见冒号：与\"引号\"", trigger=["cccccccccccc"],
+                                       day="2026-10-07", ledger_path=str(tmp_path / "led.jsonl"))
+    assert nv == 2
+    s = f.read_text(encoding="utf-8")
+    obj = yaml.safe_load(s)
+    assert obj["current"] == 2 and len(obj["versions"]) == 2
+    assert obj["versions"][0]["claim"].startswith("初版结论")  # 旧版本永不改写
+    assert obj["versions"][1]["trigger"] == ["cccccccccccc"]
+    assert "\n  - v: 2\n" in s and "current: 2" in s  # 单行 trigger 列表（metrics 证据链同侧行口径）
+    rows = [json.loads(x) for x in (tmp_path / "led.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["action"] == "add" and rows[0]["event_ids"] == ["cccccccccccc"]
+    assert rows[0]["block_key"] == "v2"
+
+
+def test_belief_version_broken_chain_raises(tmp_path):
+    """v1 与 v3 并存（v2 被挖）= 断号，写前必须报错而不是续到 v4。"""
+    broken = BELIEF_TPL.replace("  - v: 1\n", "  - v: 3\n    date: \"2026-09-03\"\n    claim: |-\n      三号版本\n    trigger: [\"eeeeeeeeeeee\"]\n  - v: 1\n", 1)
+    f = _mk(tmp_path, {"b.yaml": broken}) / "b.yaml"
+    with pytest.raises(foldlib.FoldLibError):
+        foldlib.upsert_belief_version(str(f), "新结论", trigger=["dddddddddddd"])
+
+
+def test_belief_version_empty_claim_raises(tmp_path):
+    f = _mk(tmp_path, {"b.yaml": BELIEF_TPL}) / "b.yaml"
+    with pytest.raises(foldlib.FoldLibError):
+        foldlib.upsert_belief_version(str(f), "  ")

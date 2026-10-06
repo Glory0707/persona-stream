@@ -5,7 +5,7 @@
 消费方与契约（2026-10-07 收口，此前名单各写一份、新夹具要登记两处）：
   - audit_persona      入库层：git 已跟踪文件零容忍，用全量 PATTERNS
   - check_events       原始层：只用其中保守子集（在脚本内另行维护）+ 共享 SYNTHETIC
-  - inject._recall_clean 召回复扫：经 audit_persona 别名间接用 scan_text
+  - inject._recall_clean 召回复扫：直接用 scan_text（stdlib-only，不拖审计模块进热路径）
 
 两层检测面刻意不同宽（66K 历史事件实测裁决）：把 Bearer/凭据串等宽口径下沉到
 原始层会产生 165 处误报（"密码登录"类散文、已脱敏标记复命中）——原始层宁可保守。

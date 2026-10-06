@@ -186,24 +186,24 @@ def _recall_terms(hits, cwd):
     return terms[:4]
 
 
-_AUDIT = None  # 密钥模式单一来源（audit_persona），进程内只加载一次
+_SCAN = None  # 密钥扫描单一来源（eval/secretscan，stdlib-only），进程内只加载一次
 
 
 def _recall_clean(text):
     """召回条目双保险：自动化样板文与密钥形态残留（正常不该有）都不进注入。"""
-    global _AUDIT
+    global _SCAN
     if not text or any(mk in text for mk in RECALL_NOISE):
         return False
-    if _AUDIT is None:
+    if _SCAN is None:
         try:
             sys.path.insert(0, os.path.join(_CODE_HOME, "eval"))
-            import audit_persona  # noqa: E402
-            _AUDIT = audit_persona
+            import secretscan  # noqa: E402  直连单一来源（此前绕道 audit_persona，白付 ~30ms import）
+            _SCAN = secretscan
         except Exception:
-            _AUDIT = False  # 审计模块不可用：放行（采集层已 redact，此处只是兜底）
-    if _AUDIT is False:
+            _SCAN = False  # 扫描器不可用：放行（采集层已 redact，此处只是兜底）
+    if _SCAN is False:
         return True
-    return not _AUDIT.scan_text_for_secrets("recall", text)
+    return not _SCAN.scan_text(text)
 
 
 def _index_fresh(db):

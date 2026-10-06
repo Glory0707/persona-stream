@@ -459,6 +459,77 @@ def invalidate_rule(policy_path, when_sub, day, note=""):
     return True
 
 
+# ---------- beliefs 版本链 ----------
+
+def upsert_belief_version(path, claim, trigger=None, day=None, topic=None,
+                          header=None, ledger_path=None):
+    """beliefs 版本链受控追加（FOLD_RULES §3：新观点=追加新 version，永不改写旧版本）。
+
+    新版本号 = 现有最大 v+1（既有断号先报错再写，保 audit 连续性契约）；追加
+    versions 条目（date / claim 块标量 / trigger 单行列表）并把 current 指到新版本。
+    文件不存在时创建 topic/versions/current/tension 完整骨架。claim 一律块标量承载
+    （schema §7：引号/冒号混排长字段的硬约束）；trigger 中 12-hex id 记账并回写单行
+    列表——metrics 证据链只认 `trigger:` 同一行的 id，分行写会静默脱链；非 12-hex
+    惯例 token（sunday5-* 类）只进 YAML 不进账本。写盘成功后自动记 add 账本行
+    （同 append_detail 机械记账）；返回新版本号。
+    """
+    claim = (claim or "").strip()
+    if not claim:
+        raise FoldLibError("空 claim 拒绝写入：" + path)
+    day = day or _date.today().isoformat()
+    trig, seen = [], set()
+    for t in (trigger or []):
+        t = (t or "").strip() if isinstance(t, str) else ""
+        if t and t not in seen:
+            seen.add(t)
+            trig.append(t)
+    hex_ids = [t for t in trig if EVID_RE.match(t)]
+    body = "  - v: %d\n    date: \"%s\"\n    claim: |-\n%s\n    trigger: [%s]\n"
+    indented = "\n".join("      " + ln if ln.strip() else "" for ln in claim.splitlines())
+    trig_line = ", ".join('"%s"' % t for t in trig)
+    with _write_lock(path):
+        if os.path.exists(path):
+            s = _read(path)
+            vs = sorted(int(x) for x in re.findall(r"^  - v: (\d+)$", s, re.M))
+            if not vs:
+                raise FoldLibError("不像 beliefs 版本链文件（无 versions 条目）：" + path)
+            if vs[-1] - vs[0] + 1 != len(vs):
+                raise FoldLibError("既有版本断号，先修再写：%s %r" % (os.path.basename(path), vs))
+            nv = vs[-1] + 1
+            i_v = s.index("\nversions:")
+            i_c = s.find("\ncurrent:", i_v)
+            if i_c < 0:
+                raise FoldLibError("缺 current 字段：" + path)
+            block = body % (nv, day, indented, trig_line)
+            new_s = s[:i_c] + "\n" + block + s[i_c:]
+            new_s = _set_front_line(new_s, "current", "current: %d" % nv)
+        else:
+            nv = 1
+            tp = topic or os.path.splitext(os.path.basename(path))[0]
+            block = body % (nv, day, indented, trig_line)
+            new_s = "%s\ntopic: %s\nversions:\n%scurrent: 1\ntension: []\n" % (
+                (header or ("# 信念：" + tp)), tp, block)
+        if not _yaml_ok(new_s):
+            raise YamlVerifyError("beliefs 版本写入后 YAML 无法解析：" + path)
+        import yaml
+        data = yaml.safe_load(new_s)
+        if not isinstance(data, dict) or data.get("current") != nv \
+                or not data.get("versions") or data["versions"][-1].get("v") != nv:
+            raise YamlVerifyError("beliefs 版本链回读校验失败（current/末版本不符）：" + path)
+        _write_atomic(path, new_s)
+    if ledger_path is not None and hex_ids:  # 自动记账（机械纪律；None=测试静默）
+        try:
+            try:
+                target = os.path.relpath(path, PERSONA).replace("\\", "/")
+            except ValueError:  # 跨盘符（测试 tmp 在 C:）：退化为文件名
+                target = os.path.basename(path)
+            ledger_append("add", target, "v%d" % nv, hex_ids, new_summary=claim[:120],
+                          ledger_path=ledger_path)
+        except LedgerError:
+            pass
+    return nv
+
+
 # ---------- DIGEST 确定性再生 ----------
 
 def digest_entries(threads_dir=THREADS_DIR):

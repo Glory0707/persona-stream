@@ -164,28 +164,6 @@ def day_file():
     return "events-%s.jsonl" % datetime.now().strftime("%Y%m%d")
 
 
-def state_path(sid):
-    safe = re.sub(r"[^\w\-]", "_", sid)[:48] or "unknown"
-    return os.path.join(DATA, "session_state", safe + ".json")
-
-
-def load_state(sid):
-    try:
-        with open(state_path(sid), "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def save_state(sid, st):
-    try:
-        os.makedirs(os.path.join(DATA, "session_state"), exist_ok=True)
-        with open(state_path(sid), "w", encoding="utf-8") as f:
-            json.dump(st, f, ensure_ascii=False)
-    except Exception as e:
-        log_err("save_state: %r" % e)
-
-
 def extract_preview(data):
     for key in ("stop_response", "response", "preview", "text", "content"):
         v = data.get(key)
@@ -258,10 +236,6 @@ def handle_prompt(data, base):
     if not prompt:
         return
     tags = classify(prompt)
-    st = load_state(base["session"])
-    st["task_seen"] = True
-    st["last"] = base["ts"]
-    save_state(base["session"], st)
     cues = [c for c in CORRECTION_CUES if c in prompt]
     append_jsonl(day_file(), {
         **base,
@@ -274,10 +248,6 @@ def handle_prompt(data, base):
 
 
 def handle_stop(data, base):
-    st = load_state(base["session"])
-    st["task_seen"] = True  # 2026-09-09 起全量采集：纯寒暄会话也记录，判断交给蒸馏 LLM
-    st["last"] = base["ts"]
-    save_state(base["session"], st)  # 2026-10-06 打磨：合并此前首停时的双次写盘
     preview = extract_preview(data)
     append_jsonl(day_file(), {**base, "type": "stop",
                               "preview": redact(preview),
