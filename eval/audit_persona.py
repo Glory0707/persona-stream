@@ -34,10 +34,6 @@ ROOT = os.environ.get("PERSONA_HOME") or os.path.dirname(os.path.dirname(os.path
 PERSONA = os.path.join(ROOT, "persona")
 errors, warns = [], []
 
-# 别名保留：inject._recall_clean 与单测经此引用密钥扫描（实现已收口到 secretscan）
-SECRET_PATTERNS = secretscan.PATTERNS
-SYNTHETIC_SECRETS = secretscan.SYNTHETIC
-scan_text_for_secrets = secretscan.scan_text
 SECRET_SCAN_SKIP_DIRS = (".git", ".pytest_cache", "data")
 
 
@@ -243,7 +239,7 @@ def check_privacy():
             s = open(f, encoding="utf-8").read()
         except Exception:
             continue
-        for name in set(scan_text_for_secrets(rel(f), s)):
+        for name in set(secretscan.scan_text(s)):
             errors.append(f"{rel(f)} 含{name}明文（必须脱敏）")
         for p, name in hard:
             if re.search(p, s):
@@ -327,15 +323,6 @@ def iter_git_tracked():
         return files
 
 
-def scan_text_for_secrets(relname, text):
-    """供单测复用：返回命中的密钥说明列表（tests/ 合成夹具由调用方排除）"""
-    hits = []
-    for pat, name in SECRET_PATTERNS:
-        if re.search(pat, text):
-            hits.append(name)
-    return hits
-
-
 def check_repo_secrets():
     for f in iter_git_tracked():
         parts = rel(f).split("/")
@@ -352,7 +339,7 @@ def check_repo_secrets():
         except Exception:
             continue
         text = secretscan.strip_synthetic(text)
-        for name in scan_text_for_secrets(rel(f), text):
+        for name in secretscan.scan_text(text):
             errors.append(f"{rel(f)} 含明文{name}（入库文件禁止密钥；历史泄露见 docs/SECURITY.md）")
 
 

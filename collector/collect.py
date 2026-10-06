@@ -29,8 +29,6 @@ from datetime import datetime
 ROOT = os.environ.get("PERSONA_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
 ERR_LOG = os.path.join(DATA, "collector_err.log")
-# 2026-09-09 规则变更：不再截断、不再预丢弃——全量保真采集；
-# 噪声/信号判断移交夜间蒸馏 LLM（启发式标签仅作 hint，正则仅保留秘密脱敏）
 
 # ---------- 启发式标签（只打标不丢弃，供蒸馏 LLM 参考） ----------
 SKIP_PAT = [

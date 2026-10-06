@@ -22,8 +22,6 @@ JSONL，一行一事件。公共字段：`id`（12位hex）、`ts`（ISO8601 含
 | `1`~`99` 纯数字 | `short_answer` | 照常入事件流 |
 | 系统回显（plan 注入、工具结果回显、自动化提示词） | — | 采集保留；蒸馏时默认不算用户行为，含真实决策原话则提炼 |
 
-状态文件 `data/session_state/<会话>.json`：`{task_seen, last}`；超14天由夜间任务清理。
-
 ## 3. 脱敏（采集时执行，唯一保留的正则过滤）
 
 `sk-…`、`ghp_…`、`ark-…`、`AKID…`、JWT（`eyJ…`）、BigModel 裸 key（`32hex.secret`）、

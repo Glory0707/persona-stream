@@ -486,7 +486,6 @@ def test_touch_thread_updates_idempotent_wakes(tmp_path):
 
 
 def test_touch_thread_closed_raises(tmp_path):
-    import datetime
     p = tmp_path / "c.yaml"
     p.write_text(_thread("t1", status="closed", last_seen="2026-10-01"), encoding="utf-8")
     with pytest.raises(foldlib.FoldLibError):

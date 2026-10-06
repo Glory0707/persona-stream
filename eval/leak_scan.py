@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """开源仓泄漏扫描（CI 闸门）：密钥模式 + 本机路径/身份黑名单，全树零命中才放行。
 
-与 eval/audit_persona.py 同源复用 SECRET_PATTERNS（单一口径），tests/ 合成夹具
-沿用其豁免清单。黑名单串在本文件里用拼接构造——扫描自己时不能自证命中。
+密钥模式与合成夹具豁免直接取自 eval/secretscan.py（全系统单一口径）。
+黑名单串在本文件里用拼接构造——扫描自己时不能自证命中。
 """
 import os
 import subprocess
@@ -14,7 +14,7 @@ try:  # CI 控制台常为 cp1252/ascii：输出强制 UTF-8
 except Exception:
     pass
 
-import audit_persona  # 同目录模块：密钥模式与合成豁免的唯一来源
+import secretscan  # 同目录模块：密钥模式与合成豁免的唯一来源
 
 SEP = os.sep
 
@@ -66,9 +66,9 @@ def main():
             text = raw.decode("utf-8", "replace")
         except OSError:
             continue
-        for s in audit_persona.SYNTHETIC_SECRETS:
+        for s in secretscan.SYNTHETIC:
             text = text.replace(s, "")
-        for name in audit_persona.scan_text_for_secrets(rel, text):
+        for name in secretscan.scan_text(text):
             hits.append("%s: 密钥形态（%s）" % (rel, name))
         low = text.lower()
         for b in BLACKLIST:

@@ -7,6 +7,7 @@
 """
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -159,12 +160,13 @@ def test_detects_kpi_rate_mismatch_and_duplicate(proj):
 
 
 def test_secret_scan_helper_catches_real_shapes():
-    a = load_audit(ROOT)
-    assert a.scan_text_for_secrets("x", '"apiKey": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig1234567")')
-    assert a.scan_text_for_secrets("x", '"apiKey": "abc123def456abc123def456abc123de.ns2aiiHhdj50rrOR")')
+    sys.path.insert(0, str(ROOT / "eval"))
+    import secretscan
+    assert secretscan.scan_text('"apiKey": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig1234567")')
+    assert secretscan.scan_text('"apiKey": "abc123def456abc123def456abc123de.ns2aiiHhdj50rrOR")')
     # 2026-09-10：原夹具 ark-9f196e8e-… 被 GitHub push protection 按真实火山 key 拦截，换合成形态
-    assert a.scan_text_for_secrets("x", "ark-ffeeddccbbaa0011223344556677889900ff")
-    assert a.scan_text_for_secrets("x", "nothing secret here") == []
+    assert secretscan.scan_text("ark-ffeeddccbbaa0011223344556677889900ff")
+    assert secretscan.scan_text("nothing secret here") == []
 
 
 def test_repo_secret_scan_flags_tracked_file(proj, monkeypatch):
