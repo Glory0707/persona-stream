@@ -105,7 +105,26 @@ def _write_lock(path):
         try:
             import msvcrt
         except ImportError:
-            yield  # 非 Windows：无锁退化（单写者场景）
+            msvcrt = None
+        if msvcrt is None:
+            import fcntl  # POSIX：flock 独占锁（并发追加不丢更新的语义在非 Windows 同样成立）
+            deadline = time.time() + APPEND_LOCK_TIMEOUT
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.time() > deadline:
+                        raise FoldLibError("写锁超时（疑似双实例并发写同一档案）：%s"
+                                           % os.path.basename(path))
+                    time.sleep(0.005)
+            try:
+                yield
+            finally:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                except OSError:
+                    pass
             return
         deadline = time.time() + APPEND_LOCK_TIMEOUT
         while True:

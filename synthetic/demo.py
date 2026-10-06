@@ -16,6 +16,12 @@ import shutil
 import subprocess
 import sys
 
+try:  # CI 控制台常为 cp1252/ascii：全输出强制 UTF-8（py3.7+ reconfigure）
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOME = os.path.join(REPO, "demo-home")
 
@@ -58,8 +64,9 @@ def check(desc, fn):
 
 
 def run(cmd):
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")  # 子进程输出同样强制 UTF-8
     r = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True,
-                       encoding="utf-8", errors="replace")
+                       encoding="utf-8", errors="replace", env=env)
     return r
 
 
