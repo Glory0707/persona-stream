@@ -12,6 +12,10 @@
 import json
 import os
 import sys
+try:  # Windows 控制台 cp1252 兜底：中文输出强制 UTF-8
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 from datetime import date, timedelta
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

@@ -9,6 +9,11 @@ import os
 import subprocess
 import sys
 
+try:  # CI 控制台常为 cp1252/ascii：输出强制 UTF-8
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 import audit_persona  # 同目录模块：密钥模式与合成豁免的唯一来源
 
 SEP = os.sep
