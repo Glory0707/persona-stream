@@ -25,6 +25,10 @@
   episodes / journal。所有 evidence 必须是真实存在的 12-hex 事件 id。
 - 口令复现不足 3 次不立协议；孤证规则 confidence ≤0.5 并登记进
   低置信池（日记任务的对账问题类会回来求证）。
+- **语言样本**（思想日常化，见 FOLD_RULES §5）：顺手指认当日至多 5 条最能代表
+  本人语言/思维习惯的未折原话（≤80 字，带事件 id），追加 `data/style_pool.md`
+  （`- 日期 | "原话" | ev:<id> | 为什么`）；模式候选行首标 `模式：`。
+  没有值得留的就跳过。池由月度思想挖掘（`MINING_PROMPT.md`）消费，夜间只增不清。
 
 ## 第 3 步 · 机械遗忘
 - `python distiller/foldlib.py sweep`：open→dormant（21 天）、

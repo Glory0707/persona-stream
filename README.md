@@ -120,6 +120,15 @@ matching the layout in `schema/README.md`).
    `python eval/backup.py` (weekly manifest backup, sha256, 8 generations,
    optional cross-project targets).
 
+5. **Think monthly, sample daily** — the nightly fold flags up to 5
+   representative verbatim prompts per day into `data/style_pool.md`
+   (evidence, not conclusions); a monthly job running
+   [`distiller/MINING_PROMPT.md`](distiller/MINING_PROMPT.md) re-reads the
+   month's prompt corpus horizontally and opens new belief versions for
+   language habits, work habits, thinking patterns and value tensions —
+   contradictions against existing beliefs soft-invalidate via
+   `foldlib.invalidate_*`. Mining never touches the cursor (FOLD_RULES §5).
+
 Verified against GLM and Claude model families; the distillation prompt is
 plain text — tune it for other models freely.
 

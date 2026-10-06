@@ -3,7 +3,7 @@
 """原始层每周离线备份（夜间任务第 6 步调用；目标目录在另一目录，不入库）。
 
 备份内容：
-  1. persona-stream 原始层：data/events-*.jsonl + state.json + questions_pool.md
+  1. persona-stream 原始层：data/events-*.jsonl + state.json + questions_pool.md + style_pool.md
   2. 跨项目不可再生数据（2026-10-05 项目审查加入；"可再生"=重下载/重导出/重跑脚本可得）：
      - eggpaper.db + config.yaml（D:\eggpaper\data，便携模式；析读/眉批/术语唯一副本）
      - token-usage 存量库（~92MB，上游 30 天硬删后的历史唯一副本）
@@ -54,7 +54,7 @@ CROSS_TARGETS = [
 
 def sources():
     files = sorted(glob.glob(os.path.join(DATA, "events-*.jsonl")))
-    for extra in ("state.json", "questions_pool.md"):
+    for extra in ("state.json", "questions_pool.md", "style_pool.md"):
         p = os.path.join(DATA, extra)
         if os.path.exists(p):
             files.append(p)
