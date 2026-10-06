@@ -17,6 +17,8 @@
   {date, action, target, block_key, event_ids, old_summary, new_summary}，
   提供精确幂等判重（替代启发式 KPI 匹配）与 evidence id 反向索引
 """
+import datetime
+import glob
 import json
 import os
 import re
@@ -233,6 +235,25 @@ def _wake_dormant(s, day):
     return s
 
 
+def _ledger_add(path, block_key, ids, new_summary, ledger_path):
+    """写盘成功后的机械记账（append_detail / upsert_belief_version 共用）。
+
+    锁超时/账本异常丢行不回滚档案（结论已在档案里）；跨盘符（测试 tmp 在 C:）
+    退化为文件名；ledger_path=None 跳过（测试静默）。
+    """
+    if ledger_path is None or not ids:
+        return
+    try:
+        try:
+            target = os.path.relpath(path, PERSONA).replace("\\", "/")
+        except ValueError:
+            target = os.path.basename(path)
+        ledger_append("add", target, block_key, ids, new_summary=new_summary,
+                      ledger_path=ledger_path)
+    except LedgerError:
+        pass
+
+
 def append_detail(path, block, evidence_ids, ledger_path=None):
     """向 detail 块标量追加正文块（自动 2 空格缩进）+ 合并 evidence id。
 
@@ -256,7 +277,10 @@ def append_detail(path, block, evidence_ids, ledger_path=None):
             raise FoldLibError("文件缺 evidence 行，不像线头档案：" + path)
         indented = "\n".join(("  " + ln if ln.strip() else "") for ln in block.splitlines())
         # 插入点 = detail 块标量结束处：其后第一个顶层字段行（evidence/paths/related 等顺序不定）
-        d0 = s.index("\ndetail:")
+        try:
+            d0 = s.index("\ndetail:")
+        except ValueError:
+            raise FoldLibError("文件缺 detail 字段，不像线头档案：" + path) from None
         m_next = re.search(r"\n(?=[A-Za-z_][A-Za-z0-9_]*:)", s[d0 + 1:])
         ins = (d0 + 1 + m_next.start()) if m_next else len(s)
         new_s = s[:ins] + "\n" + indented + s[ins:]
@@ -272,16 +296,7 @@ def append_detail(path, block, evidence_ids, ledger_path=None):
         if m:
             new_s = new_s[:m.start()] + "evidence: [" + ", ".join('"%s"' % i for i in have) + "]" + new_s[m.end():]
         _write_atomic(path, new_s)
-    if ledger_path is not None and add:  # 自动记账（机械纪律；None=测试静默）
-        try:
-            try:
-                target = os.path.relpath(path, PERSONA).replace("\\", "/")
-            except ValueError:  # 跨盘符（测试 tmp 在 C:）：退化为文件名
-                target = os.path.basename(path)
-            ledger_append("add", target, key, add, new_summary=key[:120],
-                          ledger_path=ledger_path)
-        except LedgerError:
-            pass
+    _ledger_add(path, key, add, key[:120], ledger_path)
     return add
 
 
@@ -496,7 +511,9 @@ def upsert_belief_version(path, claim, trigger=None, day=None, topic=None,
             if vs[-1] - vs[0] + 1 != len(vs):
                 raise FoldLibError("既有版本断号，先修再写：%s %r" % (os.path.basename(path), vs))
             nv = vs[-1] + 1
-            i_v = s.index("\nversions:")
+            i_v = s.find("\nversions:")
+            if i_v < 0:
+                raise FoldLibError("不像 beliefs 版本链文件（无 versions 行）：" + path)
             i_c = s.find("\ncurrent:", i_v)
             if i_c < 0:
                 raise FoldLibError("缺 current 字段：" + path)
@@ -507,8 +524,8 @@ def upsert_belief_version(path, claim, trigger=None, day=None, topic=None,
             nv = 1
             tp = topic or os.path.splitext(os.path.basename(path))[0]
             block = body % (nv, day, indented, trig_line)
-            new_s = "%s\ntopic: %s\nversions:\n%scurrent: 1\ntension: []\n" % (
-                (header or ("# 信念：" + tp)), tp, block)
+            new_s = "%s\ntopic: '%s'\nversions:\n%scurrent: 1\ntension: []\n" % (
+                (header or ("# 信念：" + tp)), str(tp).replace("'", "''"), block)
         if not _yaml_ok(new_s):
             raise YamlVerifyError("beliefs 版本写入后 YAML 无法解析：" + path)
         import yaml
@@ -517,16 +534,7 @@ def upsert_belief_version(path, claim, trigger=None, day=None, topic=None,
                 or not data.get("versions") or data["versions"][-1].get("v") != nv:
             raise YamlVerifyError("beliefs 版本链回读校验失败（current/末版本不符）：" + path)
         _write_atomic(path, new_s)
-    if ledger_path is not None and hex_ids:  # 自动记账（机械纪律；None=测试静默）
-        try:
-            try:
-                target = os.path.relpath(path, PERSONA).replace("\\", "/")
-            except ValueError:  # 跨盘符（测试 tmp 在 C:）：退化为文件名
-                target = os.path.basename(path)
-            ledger_append("add", target, "v%d" % nv, hex_ids, new_summary=claim[:120],
-                          ledger_path=ledger_path)
-        except LedgerError:
-            pass
+    _ledger_add(path, "v%d" % nv, hex_ids, claim[:120], ledger_path)
     return nv
 
 
@@ -534,7 +542,6 @@ def upsert_belief_version(path, claim, trigger=None, day=None, topic=None,
 
 def digest_entries(threads_dir=THREADS_DIR):
     """从线程文件收集 (last_seen, digest, thread_id)；缺 digest 的进 skipped。"""
-    import glob
     got, skipped = [], []
     for f in sorted(glob.glob(os.path.join(threads_dir, "*.yaml"))):
         s = _read(f)
@@ -665,7 +672,6 @@ def iter_events(data_dir=DATA):
     此前 pending/metrics/check_events 各写一遍"glob→逐行→json.loads"，口径漂移风险
     与三份维护成本同源；只读不写，编码错误按 replace 解码（与采集层写入口径一致）。
     """
-    import glob
     for path in sorted(glob.glob(os.path.join(data_dir, "events-*.jsonl"))):
         name = os.path.basename(path)
         with open(path, "rb") as f:
@@ -788,8 +794,6 @@ def sweep_threads(threads_dir=THREADS_DIR, day=None, dormant_days=DORMANT_DAYS,
          但不删除——closed 30 天后照常 archive_thread 留桩）
     动作均账本记 prune。返回 {"dormant": [tid…], "closed": [tid…]}。
     """
-    import datetime
-    import glob
     day = day or _date.today().isoformat()
     today = datetime.date.fromisoformat(day)
     out = {"dormant": [], "closed": []}
