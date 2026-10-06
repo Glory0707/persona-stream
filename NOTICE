@@ -1,0 +1,59 @@
+persona-stream
+Copyright 2026 Glory0707
+
+This product includes software developed as an open-source reference
+implementation of biographical persona distillation. It is licensed to you
+under the Apache License 2.0 (see LICENSE).
+
+
+Acknowledgements — ideas this project learned from
+==================================================
+
+persona-stream is not the first system to give agents memory, and it does not
+claim to have invented the ideas it builds on. What it contributes is one
+specific point in the design space: a *file-level, auditable, biographical*
+persona distilled from a user's real working behavior, with privacy boundaries
+enforced by engineering rather than promises. The lineage:
+
+- **Zettelkasten-style agentic memory — A-MEM** (Xu et al., 2025,
+  arXiv:2502.12110): atomic notes with LLM-generated structure, dynamic link
+  generation between notes, and memory evolution. Our thread `related: [...]`
+  cross-references (with dead-link and self-reference checks in
+  `eval/audit_persona.py`) are a file-level, validity-checked simplification
+  of A-MEM's link graph.
+
+- **Bi-temporal knowledge graphs with edge invalidation — Zep / Graphiti**
+  (Rasmussen et al., 2025, arXiv:2501.13956): facts carry valid-at and
+  invalid-at timestamps; contradictions soft-invalidate instead of deleting.
+  Our `invalidated:` fields on policy rules, `〔已失效 …〕` markers on thread
+  blocks, and append-only belief version chains are the same principle
+  applied to plain YAML files instead of a graph database.
+
+- **Recency × importance × relevance retrieval — Generative Agents**
+  (Park et al., 2023): memory retrieval as a scored, budgeted composition.
+  Our SessionStart injection is cruder — recency (last_seen) ordering plus
+  cwd-targeted recall under hard character budgets — but the same instinct:
+  injection is a frozen snapshot with an explicit budget, not a dump.
+
+- **Forgetting curves for agents — MemoryBank** (Zhong et al., 2023):
+  memories fade on a schedule unless reinforced. Our four-level thread
+  lifecycle (open → dormant → closed → archived, enforced mechanically by
+  `distiller/foldlib.py sweep`) is the same idea with the memory *never*
+  deleted — dormancy and archival instead of decay.
+
+- **File-based memory is a serious baseline — Letta (MemGPT)**: Letta's 2025
+  benchmark post ("Is a Filesystem All You Need?") showed plain files scoring
+  74.0% on LoCoMo, ahead of many specialized memory systems. This result is
+  part of why persona-stream commits to FTS5 + YAML with no embedding or
+  graph-database dependency.
+
+- **Time-aware memory operations — Mem0**: anchored, timestamped memory
+  operations and the ongoing discussion of memory decay (a hosted-tier
+  feature there; absent from most open-source editions) informed our choice
+  to make forgetting a first-class, mechanically-enforced lifecycle.
+
+The "biographical persona" framing — distilling a person's *policies,
+beliefs, open threads and protocols* (not chat facts) from long-running
+collaboration — is the project's own synthesis, as is the three-gate QA
+discipline and the single-controlled-write-path rule. Thanks to the authors
+above for making their work easy to learn from.

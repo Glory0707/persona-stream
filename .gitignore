@@ -1,0 +1,18 @@
+# ---- 隐私红线：原始事件层与人格档案任何情况不入库（README "Privacy model"） ----
+data/
+persona/
+demo-home/
+backups/
+
+# 侧车锁与运行残留
+*.lock
+*_err.log*
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 本地开发杂物
+.zcode/
+.zcodeignore

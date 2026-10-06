@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "persona-stream"
+version = "0.1.0"
+description = "Biographical persona distillation for AI coding agents: hook collection, nightly LLM distillation through a controlled write path, three-gate QA, SessionStart injection."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+keywords = ["agent-memory", "persona", "llm-agent", "hooks", "distillation"]
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.5"]
+dev = ["pytest>=7.0"]
+
+[tool.setuptools]
+packages = ["collector", "distiller", "eval"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

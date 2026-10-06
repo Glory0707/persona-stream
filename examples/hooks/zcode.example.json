@@ -1,0 +1,26 @@
+{
+  "_说明": "ZCode hook 配置示例：把 persona-stream 接入你的 agent 会话。将 <REPO> 替换为本仓库的检出路径，将 <PYTHON> 替换为你的 Python 解释器。数据落盘位置由环境变量 PERSONA_HOME 决定（未设置时默认为本仓库目录，原始事件层 data/ 已被 .gitignore 排除）。更多说明见 examples/hooks/README.md。",
+  "hooks": {
+    "enabled": true,
+    "events": {
+      "UserPromptSubmit": [
+        {"hooks": [{"type": "command", "command": "\"<PYTHON>\" \"<REPO>/collector/collect.py\" UserPromptSubmit", "timeoutMs": 5000}]}
+      ],
+      "Stop": [
+        {"hooks": [{"type": "command", "command": "\"<PYTHON>\" \"<REPO>/collector/collect.py\" Stop", "timeoutMs": 5000}]}
+      ],
+      "PermissionRequest": [
+        {"hooks": [{"type": "command", "command": "\"<PYTHON>\" \"<REPO>/collector/collect.py\" PermissionRequest", "timeoutMs": 5000}]}
+      ],
+      "PostToolUse": [
+        {"hooks": [{"type": "command", "command": "\"<PYTHON>\" \"<REPO>/collector/collect.py\" PostToolUse", "timeoutMs": 5000}]}
+      ],
+      "PostToolUseFailure": [
+        {"hooks": [{"type": "command", "command": "\"<PYTHON>\" \"<REPO>/collector/collect.py\" PostToolUseFailure", "timeoutMs": 5000}]}
+      ],
+      "SessionStart": [
+        {"hooks": [{"type": "command", "command": "\"<PYTHON>\" \"<REPO>/collector/inject.py\"", "timeoutMs": 5000}]}
+      ]
+    }
+  }
+}
