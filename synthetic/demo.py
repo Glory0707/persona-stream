@@ -76,7 +76,7 @@ def main():
     import inject
     import check_events
     import check_injection
-    import audit_persona
+    import secretscan
 
     if os.path.exists(HOME):
         shutil.rmtree(HOME)
@@ -184,7 +184,7 @@ def main():
         raw = "".join(open(f, encoding="utf-8", errors="replace").read()
                       for f in glob.glob(os.path.join(HOME, "data", "events-*.jsonl")))
         assert "sk-demokey" not in raw and "sk-***" in raw, "脱敏样本未按预期处理"
-        assert audit_persona.scan_text_for_secrets("demo", raw) == [], "原始层残留密钥形态"
+        assert secretscan.scan_text(raw) == [], "原始层残留密钥形态"
     check("负样本：假密钥在采集层被脱敏（sk-***），原始层零密钥形态", _secret_gone)
 
     def _noise_not_in_persona():
