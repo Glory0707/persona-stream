@@ -129,3 +129,27 @@ def test_truncated_file_reindexes_without_ghosts(tmp_path):
     build_index.build(data_dir=str(data), db=str(db), quiet=True)
     ids = sorted(r["id"] for r in build_index.search("条内容", db=str(db)))
     assert ids == ["a00000000000", "a00000000001"], ids
+
+
+def test_rewritten_prefix_reindexes_without_ghosts(tmp_path):
+    """原地改写第 1 行后续写新行（bytes 变、行数涨）→ 前缀哈希失配 → 整文件重索引。
+    该型对 (bytes, lines) 二元组数学不可分，旧判据下被改行的陈旧内容永久存留。"""
+    data = tmp_path / "data"; (data / "index").mkdir(parents=True)
+    db = data / "index" / "events.db"
+    ev = data / "events-20260101.jsonl"
+    rows = ['{"id":"a%011d","ts":"2026-01-01T0%d:00:00+08:00","hook":"UserPromptSubmit",'
+            '"session":"s","type":"prompt","text":"第%d条内容数据"}' % (i, i, i)
+            for i in range(5)]
+    ev.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    build_index.build(data_dir=str(data), db=str(db), quiet=True)
+    assert len(build_index.search("条内容", db=str(db))) == 5
+    lines = ev.read_text(encoding="utf-8").splitlines()
+    lines[0] = ('{"id":"a00000000000","ts":"2026-01-01T00:00:00+08:00","hook":"UserPromptSubmit",'
+                '"session":"s","type":"prompt","text":"被篡改的内容数据"}')
+    lines.append('{"id":"a00000000099","ts":"2026-01-01T09:00:00+08:00","hook":"UserPromptSubmit",'
+                 '"session":"s","type":"prompt","text":"续写的新行内容"}')
+    ev.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    build_index.build(data_dir=str(data), db=str(db), quiet=True)
+    assert len(build_index.search("条内容", db=str(db))) == 4   # 被改的旧"第1条"无幽灵
+    assert build_index.search("被篡改的内容", db=str(db))        # 新内容在
+    assert build_index.search("续写的新行", db=str(db))

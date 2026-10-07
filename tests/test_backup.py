@@ -87,3 +87,19 @@ def test_retention_prunes_old_generations(tmp_path, monkeypatch):
     for _ in range(3):
         assert mod.run_backup(keep=2) == 0  # 同秒重跑靠序号后缀区分
     assert len(mod.backup_dirs()) == 2
+
+
+def test_daily_light_backup_roundtrip(tmp_path, monkeypatch):
+    """--daily 日备：只备原始层、不碰跨项目目标；带 manifest 可校验；保留 3 代。"""
+    mod, broot = load_backup(tmp_path, monkeypatch)
+    seed(mod)
+    (Path(mod.DATA) / "state.json").write_text('{"updated": "t"}', encoding="utf-8")
+    for _ in range(4):
+        assert mod.run_daily() == 0
+    daily = broot / "daily"
+    gens = sorted(x for x in daily.iterdir() if x.name.startswith("daily-"))
+    assert len(gens) == 3                                   # 保留 3 代
+    manifest = json.load(open(gens[-1] / "manifest.json", encoding="utf-8"))
+    assert {"events-20260909.jsonl", "state.json"} <= set(manifest["files"])
+    assert "fake/fake.db" not in manifest["files"]          # 日备不含跨项目目标
+    assert mod.run_verify() == 1                            # 日备不生成 weekly 代，全量校验仍报"无备份"

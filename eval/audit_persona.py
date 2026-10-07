@@ -194,6 +194,9 @@ def check_beliefs():
             errors.append(f"{rel(f)} current={cur.group(1)} 但存在版本为 {vs}")
         if sorted(vs) != list(range(1, max(vs) + 1)):
             warns.append(f"{rel(f)} 版本号断号：{sorted(vs)}")
+        n = len(s.encode("utf-8"))
+        if n > 64 * 1024:   # 与 foldlib.BELIEF_BODY_LIMIT 同口径（闸门不 import distiller）
+            warns.append(f"{rel(f)} {n // 1024}KB 超 beliefs 上限 64KB，该合并归档旧版本")
 
 
 def check_links():

@@ -42,8 +42,10 @@
   SessionStart 注入依赖它——只写结构性观察，不复制人物索引已有事实）。
 
 ## 第 5 步 · 三闸门 + KPI（任何 error 当夜处置，不处置不推进游标）
-- 维护：`python eval/build_index.py`（召回索引增量）与每周
-  `python eval/backup.py`（原始层备份：manifest + sha256 + 保留 8 代）。
+- 维护：`python eval/build_index.py`（召回索引增量）；备份双频——每晚
+  `python eval/backup.py --daily`（原始层轻量日备：manifest + 保留 3 代，
+  周全量的 7 天丢失窗口压到 1 天），每周再跑
+  `python eval/backup.py`（原始层 + 跨项目不可再生数据：manifest + sha256 + 大库 gzip + 保留 8 代）。
 - `python eval/check_events.py`（原始层完整性 + 密钥兜底）
 - `python eval/audit_persona.py`（档案契约 + 全库密钥扫描 + 账本合法性）
 - `python eval/check_injection.py`（接收方读链：写侧成功 ≠ 接收方可见）

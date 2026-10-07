@@ -38,6 +38,7 @@ LEDGER_PATH = os.path.join(DATA, "fold_ledger.jsonl")
 EVID_RE = re.compile(r"^[0-9a-f]{12}$")
 BLOCK_HEAD_RE = re.compile(r"^[；;]?\s*【")
 THREAD_BODY_LIMIT = 32 * 1024   # 单线头文件字节硬上限；超限报错逼当场合并
+BELIEF_BODY_LIMIT = 64 * 1024   # beliefs 版本链字节上限；月度挖掘只增不减，超限报错逼合并归档旧版本
 DIGEST_MAX = 8                  # DIGEST 条目上限（FOLD_RULES §4）
 DIGEST_LINE_MAX = 40            # 单条 ≤40 字（含日期后缀，与 audit 同口径）
 LEDGER_ACTIONS = ("add", "update", "prune", "invalidate")
@@ -526,6 +527,9 @@ def upsert_belief_version(path, claim, trigger=None, day=None, topic=None,
             block = body % (nv, day, indented, trig_line)
             new_s = "%s\ntopic: '%s'\nversions:\n%scurrent: 1\ntension: []\n" % (
                 (header or ("# 信念：" + tp)), str(tp).replace("'", "''"), block)
+        if len(new_s.encode("utf-8")) > BELIEF_BODY_LIMIT:
+            raise FoldLibError("beliefs 文件超 %dKB 上限，先合并/归档旧版本再写：%s"
+                               % (BELIEF_BODY_LIMIT // 1024, path))
         if not _yaml_ok(new_s):
             raise YamlVerifyError("beliefs 版本写入后 YAML 无法解析：" + path)
         import yaml

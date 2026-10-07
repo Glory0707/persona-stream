@@ -4,13 +4,16 @@
 
 SQLite FTS5，trigram 分词（中文 ≥3 字可查；sqlite 过旧无 trigram 时退回 unicode61 并提示
 中文查全受限，不装任何外部依赖——hermes session_search 同款纯词法路线，无嵌入无 LLM）。
-增量构建：meta 表记每文件已索引行数与字节数（append-only，字节未变整文件跳过），
+增量构建：meta 表记每文件已索引行数、字节数与前缀内容哈希（append-only：字节未变
+整文件跳过；字节变了则比对前缀哈希，"原地改写后续写"这一型由哈希抓——(bytes,lines)
+二元组对它数学不可分；等字节的恶意改写仍不可检，属信任边界内的已知极限），
 夜间维护步骤随游标增量跑；新索引 ≥500 行时跑 FTS5 optimize 控膨胀；原始层永不改动。
 
 用法：python eval/build_index.py [--quiet] [--rebuild]
 查询：python eval/search_events.py "关键词" [--limit 10] [--json]
 """
 import glob
+import hashlib
 import json
 import os
 import sqlite3
@@ -39,13 +42,14 @@ def _has_trigram(conn):
 
 def _schema(conn, tokenize):
     conn.execute("CREATE TABLE IF NOT EXISTS meta(file TEXT PRIMARY KEY, lines INTEGER)")
-    try:
-        # 2026-10-06 打磨：记录文件字节数——事件文件 append-only，字节数未变即可整文件
-        # 跳过（此前即使无新行也要全量读 65K 行，434ms/次）
-        conn.execute("ALTER TABLE meta ADD COLUMN bytes INTEGER DEFAULT -1")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass  # 列已存在
+    for col in ("bytes", "fhash"):   # bytes=2026-10-06 打磨；fhash=2026-10-07 前缀内容哈希
+        try:
+            conn.execute("ALTER TABLE meta ADD COLUMN %s INTEGER DEFAULT -1" % col
+                         if col == "bytes" else
+                         "ALTER TABLE meta ADD COLUMN %s TEXT DEFAULT ''" % col)
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # 列已存在
     conn.execute(
         "CREATE VIRTUAL TABLE IF NOT EXISTS events USING fts5("
         "text, id UNINDEXED, ts UNINDEXED, file UNINDEXED, line UNINDEXED, "
@@ -72,12 +76,18 @@ def _event_text(obj):
 
 
 def _scan(path, start, name):
-    """单遍扫描：行号即新游标。返回 (rows, total)——rows 只收 start 之后的行。"""
+    """单遍扫描：行号即新游标。返回 (rows, total, prefix_hash, file_hash)——
+    prefix_hash=已索引前缀（前 start 行）的内容摘要，用于识别"行数增长的原地
+    改写"（截断/等长改写由 (bytes,lines) 抓，这一型此前数学不可分，幽灵行
+    永久存留）；file_hash=本次读到的全文摘要，存 meta 供下轮当比对基准。"""
     rows, total = [], start
+    h_pre, h_all = hashlib.sha256(), hashlib.sha256()
     with open(path, "rb") as f:
         for ln, raw in enumerate(f, 1):
             total = ln
+            h_all.update(raw)
             if ln <= start:
+                h_pre.update(raw)
                 continue
             try:
                 obj = json.loads(raw.decode("utf-8", "replace"))
@@ -87,7 +97,7 @@ def _scan(path, start, name):
             if txt:
                 rows.append((txt, obj.get("id") or "", obj.get("ts") or "",
                              name, ln, obj.get("type") or ""))
-    return rows, total
+    return rows, total, h_pre.hexdigest() if start else "", h_all.hexdigest()
 
 
 def build(data_dir=DATA, db=DB_PATH, rebuild=False, quiet=False, optimize_at=500):
@@ -102,30 +112,39 @@ def build(data_dir=DATA, db=DB_PATH, rebuild=False, quiet=False, optimize_at=500
         conn.commit()
     _schema(conn, tokenize)
     try:
-        done = {r[0]: (r[1], r[2]) for r in conn.execute("SELECT file, lines, bytes FROM meta")}
+        done = {r[0]: (r[1], r[2], r[3])
+                for r in conn.execute("SELECT file, lines, bytes, fhash FROM meta")}
     except sqlite3.OperationalError:
-        done = {r[0]: (r[1], -1) for r in conn.execute("SELECT file, lines FROM meta")}
+        try:
+            done = {r[0]: (r[1], r[2], "")
+                    for r in conn.execute("SELECT file, lines, bytes FROM meta")}
+        except sqlite3.OperationalError:
+            done = {r[0]: (r[1], -1, "") for r in conn.execute("SELECT file, lines FROM meta")}
     total_new = 0
     for path in sorted(glob.glob(os.path.join(data_dir, "events-*.jsonl"))):
         name = os.path.basename(path)
-        start, known_bytes = done.get(name, (0, -1))
+        start, known_bytes, known_hash = done.get(name, (0, -1, ""))
         try:
             fsize = os.path.getsize(path)
         except OSError:
             continue
         if not rebuild and known_bytes == fsize and start > 0:
             continue  # append-only：字节数未变 → 无新行，整文件跳过
-        rows, total = _scan(path, start, name)
-        if known_bytes not in (-1, fsize) and total <= start:
-            # append-only 被破坏（截断/原地改写，2026-10-07 测试员轮实测：旧行变幽灵且
-            # meta 已标"最新"会永久存留）→ 删该文件全部旧行整文件重索引
+        rows, total, pre_hash, file_hash = _scan(path, start, name)
+        truncated = known_bytes not in (-1, fsize) and total <= start
+        rewritten = (start > 0 and known_hash and pre_hash
+                     and known_hash != pre_hash)
+        if truncated or rewritten:
+            # append-only 被破坏（截断/原地改写/改写后续写，2026-10-07 测试员轮实测：
+            # 旧行变幽灵且 meta 已标"最新"会永久存留）→ 删该文件全部旧行整文件重索引
             conn.execute("DELETE FROM events WHERE file=?", (name,))
-            rows, total = _scan(path, 0, name)
+            rows, total, pre_hash, file_hash = _scan(path, 0, name)
         if rows:
             conn.executemany("INSERT INTO events VALUES (?,?,?,?,?,?)", rows)
-        conn.execute("INSERT INTO meta(file, lines, bytes) VALUES(?,?,?) "
-                     "ON CONFLICT(file) DO UPDATE SET lines=excluded.lines, bytes=excluded.bytes",
-                     (name, total, fsize))
+        conn.execute("INSERT INTO meta(file, lines, bytes, fhash) VALUES(?,?,?,?) "
+                     "ON CONFLICT(file) DO UPDATE SET lines=excluded.lines, "
+                     "bytes=excluded.bytes, fhash=excluded.fhash",
+                     (name, total, fsize, file_hash))
         conn.commit()
         total_new += len(rows)
     if total_new and total_new >= optimize_at:

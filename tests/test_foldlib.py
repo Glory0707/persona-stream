@@ -571,3 +571,26 @@ def test_belief_version_empty_claim_raises(tmp_path):
     f = _mk(tmp_path, {"b.yaml": BELIEF_TPL}) / "b.yaml"
     with pytest.raises(foldlib.FoldLibError):
         foldlib.upsert_belief_version(str(f), "  ")
+
+
+def test_belief_version_missing_current_raises(tmp_path):
+    """existing 文件缺 current 字段：报错而非静默把 current 留在旧版。"""
+    broken = BELIEF_TPL.replace("current: 1\n", "")
+    f = _mk(tmp_path, {"b.yaml": broken}) / "b.yaml"
+    with pytest.raises(foldlib.FoldLibError, match="current"):
+        foldlib.upsert_belief_version(str(f), "新结论", trigger=["dddddddddddd"])
+
+
+def test_belief_version_no_versions_entry_raises(tmp_path):
+    """existing 文件没有任何 versions 条目（如空骨架）：报错不写。"""
+    f = _mk(tmp_path, {"b.yaml": "# 信念：空壳\ntopic: 空壳\ncurrent: 1\ntension: []\n"}) / "b.yaml"
+    with pytest.raises(foldlib.FoldLibError, match="versions"):
+        foldlib.upsert_belief_version(str(f), "新结论", trigger=["dddddddddddd"])
+
+
+def test_belief_version_body_limit_raises(tmp_path):
+    """beliefs 文件超 64KB 上限：写前报错逼合并归档（月度挖掘只增不减，无闸门=无限膨胀）。"""
+    big = BELIEF_TPL.replace("初版结论：包含冒号与\"引号\"", "长" * (66 * 1024))
+    f = _mk(tmp_path, {"b.yaml": big}) / "b.yaml"
+    with pytest.raises(foldlib.FoldLibError, match="上限"):
+        foldlib.upsert_belief_version(str(f), "新结论", trigger=["dddddddddddd"])
