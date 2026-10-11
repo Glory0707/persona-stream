@@ -14,15 +14,22 @@
 - `python -c "import os,sys;sys.path.insert(0,'distiller');import foldlib;print(foldlib.ROOT)"`
   确认数据目录正确；错误信息写 `{{ERR_LOG}}` 后退出。
 
-## 第 1 步 · 幂等守卫
+## 第 1 步 · 幂等守卫与收集快照
 - `python distiller/foldlib.py pending`：返回 pending==0 且 total>0 说明
   上一夜已折完（重试场景）→ 跳到第 5 步复核闸门后直接收工，**不得重复折叠**。
+- 守卫通过后，把待折叠事件收集到位，**收集完成立即**
+  `python distiller/foldlib.py collect` 把当前各事件文件行数快照记入
+  `data/_collect_cursor.json`——这是第 6 步推进游标的**唯一合法依据**。
+  游标竞态教训（2026-10-11）：夜间运行期事件仍在追加，按结束时刻重算行数，
+  收集之后到达的事件会被"消费但从未读过"；按快照推进，并发到达留给明夜。
 
 ## 第 2 步 · 语义折叠（按 FOLD_RULES）
 - 用 `python eval/search_events.py "关键词"` 检索未折叠事件的原文与上下文；
   prompt/stop 全文、stop.reply 的 AI 回复与工具调用都在库里。
 - 按规则折入 policies / beliefs / threads / people / assets / protocols /
   episodes / journal。所有 evidence 必须是真实存在的 12-hex 事件 id。
+- journal 的 `## 待折叠` 小节与问答记录里标 [待折叠] 的答案折入档案后
+  **清除标记**——消化了不清等于重复折叠。
 - 口令复现不足 3 次不立协议；孤证规则 confidence ≤0.5 并登记进
   低置信池（日记任务的对账问题类会回来求证）。
 - **语言样本**（思想日常化，见 FOLD_RULES §5）：顺手指认当日至多 5 条最能代表
@@ -35,11 +42,16 @@
   dormant→closed（60 天）自动执行并记账；结果里被 sweep 动过的线头
   不要再手工触碰。
 
-## 第 4 步 · 确定性再生
+## 第 4 步 · 确定性再生与零引用裁决
 - `foldlib.regen_digest()` 再生 `persona/threads/DIGEST.md`
   （你只维护各线头的 `digest:` 字段，拼装排序截断是代码的事）。
 - 重写 `persona/SNAPSHOT.md`（人格速览：性格/关系结构/人际风格/关系协议的最新结论；
   SessionStart 注入依赖它——只写结构性观察，不复制人物索引已有事实）。
+- 折叠完成后跑 `python eval/missed_sessions.py` **零引用裁决**
+  （FOLD_RULES §6）：列出的账本时代零引用会话逐个二选一——漏折的当场补折
+  （走 foldlib 并记账），确认无可折的写一行 `data/fold_exclusions.jsonl`
+  （date/session/reason，显式排除永不静默）。进行中的活跃会话按日增量折叠，
+  不用排除行搪塞。
 
 ## 第 5 步 · 三闸门 + KPI（任何 error 当夜处置，不处置不推进游标）
 - 维护：`python eval/build_index.py`（召回索引增量）；备份双频——每晚
@@ -47,20 +59,25 @@
   周全量的 7 天丢失窗口压到 1 天），每周再跑
   `python eval/backup.py`（原始层 + 跨项目不可再生数据：manifest + sha256 + 大库 gzip + 保留 8 代）。
 - `python eval/check_events.py`（原始层完整性 + 密钥兜底）
-- `python eval/audit_persona.py`（档案契约 + 全库密钥扫描 + 账本合法性）
+- `python eval/audit_persona.py`（档案契约 + 全库密钥扫描 + 账本合法性 +
+  零引用会话）
 - `python eval/check_injection.py`（接收方读链：写侧成功 ≠ 接收方可见）
 - `python eval/metrics.py` 产出 coverage/backlink/broken——broken 必须 0；
   把 coverage/backlink 连同 signals/corrections/pruned 写成一条
   `kind=nightly` 的 KPI 行（追加 `eval/kpi.jsonl`，rate=corrections/signals）。
 
 ## 第 6 步 · 推进游标（最后一步）
-- 重写 `data/state.json`：`{"updated": "<实际运行时刻 ISO8601>", "files": {…每个
-  events-*.jsonl: 已处理行数}}`。时间必须是**实际运行时刻**，禁止预设。
+- `python distiller/foldlib.py advance`：按第 1 步 `collect` 快照的行数 +
+  **实际运行时刻**原子写入 `data/state.json`。**禁止结束时刻重算行数、禁止
+  手写**；快照缺失或行数倒退会报错，按失败处置。运行期新到的事件不在快照里，
+  留给明夜。
 - 在此之前任何失败：保留现场、写错误日志、退出非 0——游标不动，明夜重跑幂等。
 
 ## 第 7 步 · 清场
-- 折叠中间产物（`data/_*`、临时脚本、scratch 文件）删除；错误日志超过
-  256KB 会自动轮转，无需干预。
+- 折叠中间产物（`data/_*`、临时脚本、scratch 文件）删除；系统文件除外——
+  `state.json`、`fold_ledger.jsonl`、`fold_exclusions.jsonl`、
+  `_collect_cursor.json`、`style_pool.md`、问题池、`data/events-*.jsonl` 与
+  索引本体。错误日志超过 256KB 会自动轮转，无需干预。
 
 ## 边界与禁止
 - 不网络、不装依赖、不动 `data/events-*.jsonl` 本体（append-only）。

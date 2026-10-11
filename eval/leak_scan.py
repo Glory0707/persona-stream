@@ -14,6 +14,7 @@ try:  # CI 控制台常为 cp1252/ascii：输出强制 UTF-8
 except Exception:
     pass
 
+import re
 import secretscan  # 同目录模块：密钥模式与合成豁免的唯一来源
 
 SEP = os.sep
@@ -31,6 +32,11 @@ BLACKLIST = [
     "Glory0707/persona-stream-pri" + "vate",             # 私有仓名
     chr(21608) + chr(22885),                             # 作者真名（拆码构造，理由同上）
 ]
+
+# 盘符机器路径通配（2026-10-11 CROSS_TARGETS 事故补：固定黑名单枚举不全，
+# 任何 `X:\` / `X:/` 形态都算本机路径泄露）。tests/ synthetic/ 的夹具假路径豁免。
+DRIVE_PATH = re.compile(r"\b[A-Za-z]:[\\/]")
+DRIVE_SKIP_TOP = {"tests", "synthetic"}
 
 SKIP_DIRS = {".git", ".pytest_cache", "data", "demo-home", "__pycache__"}
 
@@ -74,6 +80,12 @@ def main():
         for b in BLACKLIST:
             if b.lower() in low:
                 hits.append("%s: 本机/身份黑名单命中（%s…）" % (rel, b[:24]))
+        if rel.split("/")[0] not in DRIVE_SKIP_TOP:
+            m = DRIVE_PATH.search(text)
+            if m:
+                hits.append("%s: 盘符机器路径（%s…）——真实路径不得入库，"
+                            "文档/示例用 {{PERSONA_HOME}} 或 ROOT 相对形态"
+                            % (rel, text[m.start():m.start() + 34].replace("\n", " ")))
     if hits:
         print("泄漏扫描 ERROR (%d)：" % len(hits))
         for h in hits:

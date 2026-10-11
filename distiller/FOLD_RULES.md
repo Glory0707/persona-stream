@@ -41,7 +41,7 @@
   每次动过线头就 `foldlib.touch_thread`。
 - 生命周期（机械执行，勿手工代替）：open 21 天未动 → sweep 置 dormant；
   dormant 60 天无活动 → 自动闭合；闭合线头写 `closure`（一句话结局）。
-- open 线头软上限 10：超限就把最弱的闭合/归档。
+- open 线头软上限 14：超限就把最弱的闭合/归档。
 
 ### people.yaml / assets.yaml
 - 只注入 name+brief / path+brief 索引（brief ≤150/≤80 字单行），
@@ -53,17 +53,19 @@
   上限 12 条——满了说明流程该合并或退场。
 
 ### episodes/ 与 journal/
-- 情绪强度 ≥4 的挫折/高光折事件卡（`emotion` 0-5 标量）；
+- 情绪强度 ≥4 的挫折/高光折事件卡（`emotion` 0-5 标量）；**卡尾带 `evidence:`**
+  事件 id 列表（与 metrics 同口径——账本 id 必须落在 evidence/trigger 字段，
+  2026-10-08 起；只在散文里提 id 等于没回链，backlink 会掉）。
   journal 的 `## 待折叠` 小节消化后**清空**。
 
 ## 2. 机械上限速查（audit 会抓）
 
 | 项 | 上限 |
 |---|---|
-| DIGEST 条目 / 单条长度 | 8 条 / 40 字（含日期后缀） |
+| DIGEST 条目 / 单条长度 | 12 条 / 40 字（含日期后缀） |
 | 线头 digest（写入值） | 32 字 |
 | 线头正文 | 32 KB |
-| open / dormant 线头 | 10 / 8 |
+| open / dormant 线头 | 14 / 8 |
 | protocols / assets | 12 / 12 |
 | people brief / assets brief | ≤160 / ≤80 字符 |
 
@@ -81,13 +83,20 @@
 
 ## 4. 收尾顺序（每夜固定）
 
-1. `foldlib.pending` 幂等守卫（游标后事件 vs 账本）
-2. 语义折叠（本文件规则）
-3. `python distiller/foldlib.py sweep`（机械遗忘）
-4. `foldlib.regen_digest`（DIGEST 确定性再生）
-5. 三闸门：`check_events` → `audit_persona` → `check_injection`；
+1. 读游标并收集新事件；**收集完成后立即** `python distiller/foldlib.py collect`
+   把行数快照记入 `data/_collect_cursor.json`——这是收尾推进游标的唯一依据
+2. `foldlib.pending` 幂等守卫（游标后事件 vs 账本；pending==0 且 total>0
+   → 上夜已折完，直接复核闸门收工）
+3. 语义折叠（本文件规则）
+4. `python eval/missed_sessions.py` 零引用裁决（补折或写排除行，见 §6）
+5. `python distiller/foldlib.py sweep`（机械遗忘）＋
+   `foldlib.regen_digest`（DIGEST 确定性再生）
+6. 三闸门：`check_events` → `audit_persona` → `check_injection`；
    `python eval/metrics.py` 把 coverage/backlink 抄进 KPI 行
-6. **最后**推进游标 `data/state.json`——之前任何失败都只是幂等重跑
+7. **最后** `python distiller/foldlib.py advance` 按快照推进游标——
+   运行期新到的事件不在快照里，留给明夜（游标竞态，2026-10-11：按结束时刻
+   重算行数，并发会话的收尾事件会被"消费但从未读过"）。
+   之前任何失败都只是幂等重跑
 
 三闸门任何 error 当夜必须处置：修档案或修规则，不修就停推游标
 （注入读链断= 用户侧看不见你写的字，等于没写）。
@@ -105,3 +114,21 @@
   思维模式与价值张力各开 beliefs 新版本（`思维模式.yaml`，版本链惯例）；本月新折叠
   与既有 beliefs/policies 矛盾时走 `invalidate_block`/`invalidate_rule` 软失效。
   挖掘读的是已消费历史，**不碰游标**；档案写入走 §3 写路径纪律。
+
+## 6. 排除与零引用裁决（2026-10-11 起，漏折事故的完整性网）
+
+- **折叠排除**：宿主目录内的系统操作事件（hook 自身执行、git、跑测试、
+  编辑本仓库文件）不折；但同目录下的**个人对话照折**——判定标准是内容是否
+  关于档案主，判断不了默认折（漏了比多了代价大）。任务自身的标记词事件、
+  `/clear` 类会话管理命令、重复 id 不折。因 cwd 被排除但确属个人对话的，
+  可从宿主 CLI 的 rollout 目录补读（`collector/backfill_rollout.py` 出聚合
+  报告，只打印不落盘）。
+- **会话级显式排除**：整段会话确认无可折内容（纯寒暄/测试噪音/话题已被
+  其他会话承载）时，写一行 `data/fold_exclusions.jsonl`
+  （date/session/reason）——排除必须留痕，**禁止静默跳过**；进行中的活跃
+  会话按日增量折叠，不用排除行搪塞。
+- **零引用裁决**：`python eval/missed_sessions.py` 把"已消费但整个会话零引用
+  （账本 ∪ evidence 都不含其任何事件 id）"的会话按纪元列出，夜间任务逐个
+  二选一：补折（变为被引用，自动从报告消失）或写排除行。audit_persona 以
+  WARN 接力，裁决完应清零。历史教训：一整段 12 事件的会话在夜间任务自己
+  打印的清单里仍被丢掉，而三道闸门无一报警——完整性必须有自己的网。
