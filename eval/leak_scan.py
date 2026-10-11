@@ -34,8 +34,10 @@ BLACKLIST = [
 ]
 
 # 盘符机器路径通配（2026-10-11 CROSS_TARGETS 事故补：固定黑名单枚举不全，
-# 任何 `X:\` / `X:/` 形态都算本机路径泄露）。tests/ synthetic/ 的夹具假路径豁免。
-DRIVE_PATH = re.compile(r"\b[A-Za-z]:[\\/]")
+# "大写盘符冒号+分隔符"形态一律算本机路径泄露；小写放行是给源码里的正则
+# 字符类（如冒号+反斜杠小写s）留活口——Windows 盘符约定大写）。
+# tests/ synthetic/ 的夹具假路径豁免。
+DRIVE_PATH = re.compile(r"\b[A-Z]:[\\/]")
 DRIVE_SKIP_TOP = {"tests", "synthetic"}
 
 SKIP_DIRS = {".git", ".pytest_cache", "data", "demo-home", "__pycache__"}
