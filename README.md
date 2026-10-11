@@ -46,7 +46,11 @@ Two things it refuses to compromise on:
    `evidence: [event-id]` pointer chains back into the raw event stream
    (searchable via FTS5, no embeddings). `eval/metrics.py` computes fold
    coverage and evidence back-link rate nightly; a broken pointer is an
-   exit-code-1 error, not a note.
+   exit-code-1 error, not a note. And folds themselves cannot be silently
+   skipped: `eval/missed_sessions.py` lists any consumed session that ended up
+   cited nowhere (fold it or record an explicit exclusion), and the nightly
+   cursor only advances to a collection-time snapshot (`foldlib.py collect` /
+   `advance`), so events arriving mid-run are never "consumed but unread".
 
 For related work this project learned from (A-MEM, Zep/Graphiti, Mem0, Letta,
 Generative Agents, MemoryBank) and what it changed, see [NOTICE](NOTICE) — an
@@ -172,12 +176,15 @@ and colons broke real deployments twice before the rule existed.
 
 ```text
 collector/   collect.py (5 hook events → JSONL) · inject.py (SessionStart)
-distiller/   foldlib.py (the ONLY write path) · FOLD_RULES.md · AUTOMATION_PROMPT.md
+             backfill_rollout.py (aggregate report over host rollout logs)
+distiller/   foldlib.py (the ONLY write path; pending · collect · advance ·
+             sweep) · FOLD_RULES.md · AUTOMATION_PROMPT.md · MINING_PROMPT.md
 eval/        check_events · audit_persona · check_injection · build_index
-             search_events · metrics · backup · plot_kpi · leak_scan
+             search_events · metrics · missed_sessions (fold-completeness net)
+             backup · plot_kpi · leak_scan
 synthetic/   generate.py · distill_demo.py · demo.py   ← start here
 schema/      README.md — the data contract (authoritative)
-tests/       147 regression tests (pytest, no network, no real data)
+tests/       161 regression tests (pytest, no network, no real data)
 examples/    hook configuration examples
 ```
 
