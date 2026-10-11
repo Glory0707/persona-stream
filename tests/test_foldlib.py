@@ -103,21 +103,22 @@ def test_set_digest_and_regen_deterministic(tmp_path):
     n, skipped, dropped = foldlib.regen_digest(threads_dir=str(d), out=str(d / "DIGEST.md"))
     assert (n, skipped, dropped) == (3, ["d"], [])
     out = (d / "DIGEST.md").read_text(encoding="utf-8")
-    assert "共3条 open（上限8）" in out
+    assert "共3条 open（上限12）" in out
     i_a, i_b = out.index("- [open] 甲最新"), out.index("- [open] 乙最旧")
     assert i_a < i_b  # last_seen 降序
     assert "- [open] 甲最新（10-01）" in out
 
 
-def test_regen_digest_caps_at_8(tmp_path):
+def test_regen_digest_caps_at_max(tmp_path):
+    """DIGEST_MAX=12（2026-10-07 本人授权由 8 放宽）：超出即截断进 dropped，不报错。"""
     d = tmp_path / "threads"
     files = {}
-    for i in range(10):
+    for i in range(14):
         files["threads/t%02d.yaml" % i] = _thread(
             "t%02d" % i, last_seen="2026-09-%02d" % (i + 1), digest="线头%d号摘要" % i)
     _mk(tmp_path, files)
     n, skipped, dropped = foldlib.regen_digest(threads_dir=str(d), out=str(d / "DIGEST.md"))
-    assert n == 8 and len(dropped) == 2 and not skipped
+    assert n == 12 and len(dropped) == 2 and not skipped
 
 
 def test_regen_digest_rejects_overlong(tmp_path):
@@ -429,6 +430,23 @@ def test_append_detail_auto_ledgers(tmp_path):
     assert len(led.read_text(encoding="utf-8").splitlines()) == 1
 
 
+def test_append_detail_auto_ledgers_by_default(tmp_path):
+    """ledger_path 缺省 = 真账本 LEDGER_PATH（autouse fixture 重定向到 tmp）。
+
+    2026-10-07 夜事故回归钉：旧语义把 None 当"跳过"，生产调用全走默认值，
+    机械记账静默失效一夜（auto-行全缺）。upsert_belief_version 同路径共用。"""
+    p = tmp_path / "t.yaml"
+    p.write_text(_thread("t1"), encoding="utf-8")
+    foldlib.append_detail(str(p), "；【10-7：缺省记账】正文", ["cccccccccccc"])
+    led = tmp_path / "auto-ledger.jsonl"
+    rows = [json.loads(l) for l in led.read_text(encoding="utf-8").splitlines()]
+    assert any(r["action"] == "add" and r["event_ids"] == ["cccccccccccc"] for r in rows)
+    foldlib.upsert_belief_version(str(tmp_path / "b.yaml"), "缺省路径也入账",
+                                  trigger=["dddddddddddd"], topic="交叉学科与AI")
+    rows = [json.loads(l) for l in led.read_text(encoding="utf-8").splitlines()]
+    assert any(r["action"] == "add" and r["event_ids"] == ["dddddddddddd"] for r in rows)
+
+
 def test_add_related_and_paths_wake_dormant(tmp_path):
     import datetime
     today = datetime.date.today().isoformat()
@@ -594,3 +612,52 @@ def test_belief_version_body_limit_raises(tmp_path):
     f = _mk(tmp_path, {"b.yaml": big}) / "b.yaml"
     with pytest.raises(foldlib.FoldLibError, match="上限"):
         foldlib.upsert_belief_version(str(f), "新结论", trigger=["dddddddddddd"])
+
+
+# ---------- 游标竞态：collect / advance（2026-10-11，eggpaper 尾部 stop 被消费未读） ----------
+
+def _mkdata(tmp_path, lines=3, name="events-20261011.jsonl"):
+    d = tmp_path / "data"
+    d.mkdir()
+    (d / name).write_text(
+        "\n".join('{"id":"aaaaaaaaaaaa","type":"prompt","text":"x"}' for _ in range(lines)) + "\n",
+        encoding="utf-8")
+    return d
+
+
+def test_collect_advance_roundtrip(tmp_path):
+    d = _mkdata(tmp_path)
+    snap = foldlib.collect_cursor(data_dir=str(d), now="2026-10-11T23:00:00+08:00")
+    assert snap["files"] == {"events-20261011.jsonl": 3}
+    assert (d / "_collect_cursor.json").exists()
+    st = foldlib.advance_cursor(state_path=str(d / "state.json"), data_dir=str(d),
+                                now="2026-10-11T23:10:00+08:00")
+    assert st["files"]["events-20261011.jsonl"] == 3
+    assert st["updated"] == "2026-10-11T23:10:00+08:00"
+    on_disk = json.loads((d / "state.json").read_text(encoding="utf-8"))
+    assert on_disk["files"]["events-20261011.jsonl"] == 3
+
+
+def test_advance_uses_snapshot_not_recount(tmp_path):
+    d = _mkdata(tmp_path)
+    foldlib.collect_cursor(data_dir=str(d))
+    with open(d / "events-20261011.jsonl", "a", encoding="utf-8") as f:
+        f.write('{"id":"bbbbbbbbbbbb","type":"prompt","text":"runtime-arrived"}\n')
+    st = foldlib.advance_cursor(state_path=str(d / "state.json"), data_dir=str(d))
+    assert st["files"]["events-20261011.jsonl"] == 3   # 新到事件不在快照里，留给下一次
+
+
+def test_advance_requires_snapshot(tmp_path):
+    d = _mkdata(tmp_path)
+    with pytest.raises(foldlib.FoldLibError):
+        foldlib.advance_cursor(state_path=str(d / "state.json"), data_dir=str(d))
+
+
+def test_advance_rejects_line_regression(tmp_path):
+    d = _mkdata(tmp_path, lines=5)
+    foldlib.collect_cursor(data_dir=str(d))
+    foldlib.advance_cursor(state_path=str(d / "state.json"), data_dir=str(d))
+    (d / "_collect_cursor.json").write_text(
+        json.dumps({"collected_at": "t", "files": {"events-20261011.jsonl": 2}}), encoding="utf-8")
+    with pytest.raises(foldlib.FoldLibError):
+        foldlib.advance_cursor(state_path=str(d / "state.json"), data_dir=str(d))

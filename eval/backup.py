@@ -5,15 +5,8 @@
 备份内容：
   1. persona-stream 原始层：data/events-*.jsonl + state.json + questions_pool.md + style_pool.md
      （--daily 模式只备这一层，保留 3 代；全量模式保留 8 代）
-  2. 跨项目不可再生数据（2026-10-05 项目审查加入；"可再生"=重下载/重导出/重跑脚本可得）：
-     - eggpaper.db + config.yaml（D:\eggpaper\data，便携模式；析读/眉批/术语唯一副本）
-     - token-usage 存量库（~92MB，上游 30 天硬删后的历史唯一副本）
-     - lang-calib calib.db + config.json + engine_scores.json（382 条人工语料）
-     - human-vs-ai corpus_private/（私有语料，永不入库）
-     - Surtitre 项目（排除 models/dist_new/test——大体积可再生，源码另有 git 覆盖）
-     - winvalet（2026-10-07 加入：整个目录无 git 仓库，源码+图库 ref 样张/templates/
-       CATALOG/SOURCES 无第二副本；venv 重装可得、gallery/out 由模板固定 seed
-       重生成、_qa*/_probe 为评审中间物，均不备）
+  2. 跨项目不可再生数据（CROSS_TARGETS 实例表驱动，见下；"可再生"=重下载/重导出/
+     重跑脚本可得——真实目标在你的本地副本里维护，模板默认空表）
 
 布局：<backup_root>/weekly/backup-YYYYMMDD-HHMMSS/ 内逐文件复制 + manifest.json
       （sha256/字节数/行数，--verify 可离线校验；跨项目文件键名带项目前缀）
@@ -48,26 +41,14 @@ DAILY = os.path.join(BACKUP_ROOT, "daily")
 
 # 跨项目目标：(kind, 源路径, manifest 键名, 树排除项)
 # kind: sqlite=backup API 快照；file=单文件；tree=整目录
+# 跨项目不可再生数据（实例差异表：在你的本地副本里替换为真实目标）。
+# 模板留空——默认没有跨项目目标，weekly 备份只覆盖本仓数据层。
+# 条目形态（key=备份内相对路径；excludes 仅对 tree 生效；缺省路径记 missing 跳过）：
+#   ("sqlite", "~/data/app.db", "app/app.db", None)
+#   ("file",   "~/data/config.yaml", "app/config.yaml", None)
+#   ("tree",   "~/projects/irreplaceable", "irreplaceable",
+#    {".venv", "__pycache__", ".git", "out"})
 CROSS_TARGETS = [
-    ("sqlite", r"D:\eggpaper\data\eggpaper.db", "eggpaper/eggpaper.db", None),
-    ("file", r"D:\eggpaper\data\config.yaml", "eggpaper/config.yaml", None),
-    ("sqlite", r"D:\tools\token-usage\store\usage-history.sqlite",
-     "token-usage/usage-history.sqlite", None),
-    ("sqlite", r"D:\tools\human-vs-ai\lang-calib\data\calib.db", "lang-calib/calib.db", None),
-    ("file", r"D:\tools\human-vs-ai\lang-calib\data\config.json", "lang-calib/config.json", None),
-    ("file", r"D:\tools\human-vs-ai\lang-calib\data\engine_scores.json",
-     "lang-calib/engine_scores.json", None),
-    ("tree", r"D:\tools\human-vs-ai\corpus_private", "corpus_private", set()),
-    # Surtitre：models 重下载、dist_new 构建产物、test/hard 2.3G 音频可由 make_tts
-    # 等脚本重建、.venv 可重建；config/logs/源码/ui/installer 全保（logs/ 里是
-    # 会话历史，必须保）
-    ("tree", r"D:\tools\surtitre", "surtitre",
-     {"models", "dist_new", "hard", "__pycache__", ".git", ".venv"}),
-    # winvalet（2026-10-07）：无 git，源码+图库 ref 样张/templates 无第二副本；
-    # venv 重装可得、gallery/out 由模板固定 seed 重生成、_qa*/_probe 评审中间物
-    ("tree", r"D:\chat\winvalet", "winvalet",
-     {"venv", "__pycache__", "winvalet.egg-info", ".git", "out",
-      "_qa", "_qa_r21", "_qa9", "_probe", "_rev9"}),
 ]
 
 
@@ -109,6 +90,16 @@ def _record(path, key, meta):
     meta[key] = {"sha256": sha, "bytes": os.path.getsize(path), "lines": lines}
 
 
+def _safe_rel(full, src):
+    """relpath 的防御壳：Windows 保留名（如字面文件 nul）会让 relpath 解析成 \\\\.\\nul
+    设备路径而抛 ValueError（2026-10-11 周备首炸）。返回 None 表示跳过，并向 stderr 留痕。"""
+    try:
+        return os.path.relpath(full, src)
+    except ValueError:
+        print(f"backup: 跳过无法相对化的路径（Windows 保留名？）：{full}", file=sys.stderr)
+        return None
+
+
 def copy_cross(dst, meta, missing):
     """把跨项目目标收进这一代备份目录。缺失的源记入 missing，不算失败。"""
     for kind, src, key, excludes in CROSS_TARGETS:
@@ -123,10 +114,14 @@ def copy_cross(dst, meta, missing):
             for root, dirs, fs in os.walk(src):
                 dirs[:] = [d for d in dirs
                            if d not in excludes
+                           and _safe_rel(os.path.join(root, d), src) is not None
                            and os.path.relpath(os.path.join(root, d), src).replace("\\", "/") not in excludes]
                 for fn in fs:
                     full = os.path.join(root, fn)
-                    rel = os.path.relpath(full, src).replace("\\", "/")
+                    rel = _safe_rel(full, src)
+                    if rel is None:
+                        continue   # 保留名/设备路径（如字面名 nul）：relpath 会炸成 \\.\nul，跳过并留痕
+                    rel = rel.replace("\\", "/")
                     fout = os.path.join(out, *rel.split("/"))
                     os.makedirs(os.path.dirname(fout), exist_ok=True)
                     try:

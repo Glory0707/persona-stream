@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "distiller"))
+import foldlib  # noqa: E402  DIGEST 上限单一来源（防检查与测试双双写死漂移，2026-10-11）
 
 
 def load_audit(tmp_root):
@@ -213,10 +215,16 @@ def test_digest_contract(proj):
     assert any("超 40 字" in e for e in a.errors)
 
     (proj / "persona" / "threads" / "DIGEST.md").write_text(
-        "\n".join("- [open] 线头%d" % i for i in range(9)), encoding="utf-8")
+        "\n".join("- [open] 线头%d" % i for i in range(foldlib.DIGEST_MAX)), encoding="utf-8")
     a2 = load_audit(proj)
     a2.check_digest_and_core()
-    assert any("上限 8" in e for e in a2.errors)
+    assert not any("上限" in e for e in a2.errors)
+
+    (proj / "persona" / "threads" / "DIGEST.md").write_text(
+        "\n".join("- [open] 线头%d" % i for i in range(foldlib.DIGEST_MAX + 1)), encoding="utf-8")
+    a2b = load_audit(proj)
+    a2b.check_digest_and_core()
+    assert any("上限 %d" % foldlib.DIGEST_MAX in e for e in a2b.errors)
 
     (proj / "persona" / "threads" / "DIGEST.md").write_text(
         "- [closed] 已闭合的旧线头\n", encoding="utf-8")
@@ -307,3 +315,24 @@ def test_kpi_missing_coverage_warns(proj):
     a.check_kpi()
     assert any("2026-10-07" in w and "coverage/backlink" in w for w in a.warns)
     assert not any("2026-10-06" in w and "coverage/backlink" in w for w in a.warns)
+
+
+def test_missed_sessions_warn_and_exclusion(proj):
+    data = proj / "data"
+    data.mkdir()
+    (data / "events-20261011.jsonl").write_text(
+        json.dumps({"id": "aaaaaaaaaaaa", "ts": "2026-10-11T10:00:00+08:00", "type": "prompt",
+                    "session": "sess_u1", "cwd": "D:/chat", "text": "找论文"},
+                   ensure_ascii=False) + "\n", encoding="utf-8")
+    (data / "state.json").write_text(
+        json.dumps({"files": {"events-20261011.jsonl": 1}}), encoding="utf-8")
+    a = load_audit(proj)
+    a.check_missed_sessions()
+    assert any("零引用会话" in w for w in a.warns)
+    # 显式排除后不再 WARN
+    (data / "fold_exclusions.jsonl").write_text(
+        json.dumps({"date": "2026-10-11", "session": "sess_u1", "reason": "r"},
+                   ensure_ascii=False) + "\n", encoding="utf-8")
+    a2 = load_audit(proj)
+    a2.check_missed_sessions()
+    assert not any("零引用会话" in w for w in a2.warns)

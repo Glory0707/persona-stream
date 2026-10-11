@@ -302,8 +302,8 @@ def build_context(cwd=None):
     try:
         dig = read_all(DIGEST)
         n_open = len(re.findall(r"^\s*-\s*\[open\]", dig, re.M))
-        parts.append("【未闭合线头】（最近蒸馏快照，行动前以磁盘/仓库现状为准；共%d条 open/上限8）\n"
-                     % n_open + dig)
+        parts.append("【未闭合线头】（最近蒸馏快照，行动前以磁盘/仓库现状为准；共%d条 open/上限12）\n"
+                     % n_open + dig)  # 上限与 foldlib.DIGEST_MAX 同步（2026-10-07 授权 8→12）
     except Exception:
         pass
     try:

@@ -12,7 +12,7 @@
   7. 隐私：入库档案中的密钥/身份证/银行卡模式（邮箱与手机号仅提示）
   8. KPI 健康：行级合法性、nightly 连续 pruned=0、kind 缺失、rate 对不上、重复折叠
   9. 仓库安全：所有 git 已跟踪文件的明文密钥扫描（tests/ 合成夹具除外）
- 10. DIGEST 契约：≤8 条、每条 ≤40 字、只放 open 线头；core.md AUTO 区存在
+ 10. DIGEST 契约：≤12 条（2026-10-07 授权放宽，与 foldlib.DIGEST_MAX 同步）、每条 ≤40 字、只放 open 线头；core.md AUTO 区存在
  11. 线头扩展契约：related 死链/自引用、paths 目录存在性、open 缺 digest、closed 未压缩、open 总数超顶
  12. policies 规则 invalidated 日期格式；fold_ledger.jsonl 行级合法性
 
@@ -29,6 +29,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import secretscan  # noqa: E402  密钥模式/豁免名单单一来源（eval/secretscan.py）
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "distiller"))
+import foldlib  # noqa: E402  DIGEST 渲染上限单一来源（2026-10-11 修复：8 硬编码漏随 10-07 授权放宽，闸门误报 ERROR）
 
 ROOT = os.environ.get("PERSONA_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PERSONA = os.path.join(ROOT, "persona")
@@ -173,8 +175,8 @@ def check_threads():
                 p = p.strip().strip("'\"")
                 if p and not os.path.isdir(p):
                     warns.append(f"{rel(f)} paths 目录不存在（使用时回写或删除）：{p}")
-    if open_count > 10:
-        warns.append(f"open 线头 {open_count} 条（FOLD_RULES §-1 软上限 10）——夜间任务应闭合/归档最弱者")
+    if open_count > 14:
+        warns.append(f"open 线头 {open_count} 条（FOLD_RULES §-1 软上限 14）——夜间任务应闭合/归档最弱者")
     if dormant_count > 8:
         warns.append(f"dormant 线头 {dormant_count} 条（软上限 8）——foldlib sweep 60 天自动闭合"
                      f"兜底前，夜间任务应先复核可否直接关闭")
@@ -386,8 +388,8 @@ def check_digest_and_core():
     else:
         lines = [l for l in open(d, encoding="utf-8").read().splitlines()
                  if re.match(r"^\s*-\s*\[", l)]
-        if len(lines) > 8:
-            errors.append(f"DIGEST.md 有 {len(lines)} 条（上限 8，超的留给按需读取）")
+        if len(lines) > foldlib.DIGEST_MAX:
+            errors.append(f"DIGEST.md 有 {len(lines)} 条（上限 {foldlib.DIGEST_MAX}，超的留给按需读取）")
         for l in lines:
             body = re.sub(r"^\s*-\s*\[(open|closed)\]\s*", "", l)
             if len(body) > 40:
@@ -403,11 +405,29 @@ def check_digest_and_core():
             warns.append("core.md 缺 AUTO:BEGIN/END 标记（夜间任务无法安全重写自动区）")
 
 
+def check_missed_sessions():
+    """零引用会话（2026-10-11 起，HPMC 漏折事故完整性网）。
+
+    账本时代已消费的"有内容事件"若整个会话无任何事件被账本/evidence 引用，
+    即漏折或未裁决——WARN 逼夜间逐条判断：补折（成为被引用）或写
+    data/fold_exclusions.jsonl 显式排除。列表工具本体在 eval/missed_sessions.py。
+    """
+    import missed_sessions
+    m = missed_sessions.scan(data_dir=os.path.join(ROOT, "data"), persona=PERSONA)
+    rows = m["ledger"]
+    if rows:
+        sample = "；".join("%s@%s %s" % (r["session"][:14], r["first"][:10], r["snippet"][:24])
+                           for r in rows[:3])
+        warns.append(f"零引用会话 {len(rows)} 个未裁决（补折或写 data/fold_exclusions.jsonl，"
+                     f"明细：python eval/missed_sessions.py）：{sample}")
+
+
 def main():
     quiet = "--quiet" in sys.argv
     for fn in (check_people, check_assets, check_threads, check_beliefs, check_links,
                check_yaml, check_privacy, check_kpi, check_policies_lifecycle,
-               check_fold_ledger, check_repo_secrets, check_digest_and_core):
+               check_fold_ledger, check_repo_secrets, check_digest_and_core,
+               check_missed_sessions):
         try:
             fn()
         except Exception as e:

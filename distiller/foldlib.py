@@ -39,7 +39,7 @@ EVID_RE = re.compile(r"^[0-9a-f]{12}$")
 BLOCK_HEAD_RE = re.compile(r"^[；;]?\s*【")
 THREAD_BODY_LIMIT = 32 * 1024   # 单线头文件字节硬上限；超限报错逼当场合并
 BELIEF_BODY_LIMIT = 64 * 1024   # beliefs 版本链字节上限；月度挖掘只增不减，超限报错逼合并归档旧版本
-DIGEST_MAX = 8                  # DIGEST 条目上限（FOLD_RULES §4）
+DIGEST_MAX = 12                 # DIGEST 条目上限（FOLD_RULES §4；2026-10-07 本人授权 8→12，挤掉的新项目线头回渲染）
 DIGEST_LINE_MAX = 40            # 单条 ≤40 字（含日期后缀，与 audit 同口径）
 LEDGER_ACTIONS = ("add", "update", "prune", "invalidate")
 STALE_ARCHIVE_DAYS = 30         # closed 超此天数可迁移 _archive
@@ -240,10 +240,14 @@ def _ledger_add(path, block_key, ids, new_summary, ledger_path):
     """写盘成功后的机械记账（append_detail / upsert_belief_version 共用）。
 
     锁超时/账本异常丢行不回滚档案（结论已在档案里）；跨盘符（测试 tmp 在 C:）
-    退化为文件名；ledger_path=None 跳过（测试静默）。
+    退化为文件名；ledger_path=None 解析为真账本 LEDGER_PATH（2026-10-07 夜修：
+    旧语义把 None 当"跳过"，而生产调用全走默认值——机械记账静默失效一夜，
+    auto-行全缺，靠账本巡检发现后回填。测试由 autouse fixture 重定向 LEDGER_PATH）。
     """
-    if ledger_path is None or not ids:
+    if not ids:
         return
+    if ledger_path is None:
+        ledger_path = LEDGER_PATH
     try:
         try:
             target = os.path.relpath(path, PERSONA).replace("\\", "/")
@@ -712,14 +716,83 @@ def pending(state_path=None, data_dir=DATA, ledger_path=None):
     return {"total": total, "already": already, "pending": total - already}
 
 
+def _event_line_counts(data_dir=DATA):
+    """各事件文件当前行数（state.json 同口径：物理行数）。"""
+    out = {}
+    for fn in sorted(glob.glob(os.path.join(data_dir, "events-*.jsonl"))):
+        n = 0
+        with open(fn, "rb") as f:
+            for _ in f:
+                n += 1
+        out[os.path.basename(fn)] = n
+    return out
+
+
+def collect_cursor(data_dir=DATA, out=None, now=None):
+    """记录收集时点各事件文件行数到 data/_collect_cursor.json（第 2 步末尾调用）。
+
+    游标竞态教训（2026-10-11，eggpaper 22:15:34 stop 被消费未读）：夜间运行
+    期间事件仍在追加，若第 8 步按结束时刻重算行数推进游标，收集之后到达的
+    事件就被"消费但从未读过"。快照 = 实际读到的位置，advance 只认它。
+    """
+    snap = {"collected_at": now or datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+            "files": _event_line_counts(data_dir)}
+    path = out or os.path.join(data_dir, "_collect_cursor.json")
+    _write_atomic(path, json.dumps(snap, ensure_ascii=False, indent=1) + "\n")
+    return snap
+
+
+def advance_cursor(state_path=None, data_dir=DATA, src=None, now=None):
+    """按收集快照原子推进游标（第 8 步唯一合法方式，禁手写/重算行数）。
+
+    行数只许增不许减（快照过期/事件文件回退即报错）；快照里没有的文件不动
+    （运行期新建的文件留给下一次）；成功后 state.json 的 updated=实际运行时刻。
+    """
+    sp = state_path or os.path.join(data_dir, "state.json")
+    path = src or os.path.join(data_dir, "_collect_cursor.json")
+    if not os.path.exists(path):
+        raise FoldLibError("缺少收集快照 %s——先跑 foldlib.py collect（游标竞态纪律，2026-10-11）" % path)
+    try:
+        snap = json.load(open(path, encoding="utf-8"))
+    except Exception as e:
+        raise FoldLibError("收集快照不可读：%s（%s）" % (path, e))
+    files = snap.get("files") or {}
+    if not files:
+        raise FoldLibError("收集快照无 files 字段：%s" % path)
+    try:
+        state = json.load(open(sp, encoding="utf-8"))
+    except Exception:
+        state = {}
+    cur = state.get("files") or {}
+    for name, ln in sorted(files.items()):
+        old = cur.get(name, 0)
+        if ln < old:
+            raise FoldLibError("快照行数倒退（%s: %d < 现游标 %d）——快照过期，重新 collect" % (name, ln, old))
+    cur.update(files)
+    state["files"] = cur
+    state["updated"] = now or datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+    _write_atomic(sp, json.dumps(state, ensure_ascii=False, indent=2) + "\n")
+    return state
+
+
 def _cli(argv):
     if argv[:1] == ["pending"]:
         print(json.dumps(pending(), ensure_ascii=False))
+        return 0
+    if argv[:1] == ["collect"]:
+        print(json.dumps(collect_cursor(), ensure_ascii=False))
+        return 0
+    if argv[:1] == ["advance"]:
+        st = advance_cursor()
+        print(json.dumps({"updated": st.get("updated"), "files": len(st.get("files") or {})},
+                         ensure_ascii=False))
         return 0
     if argv[:1] == ["sweep"]:
         print(json.dumps(sweep_threads(), ensure_ascii=False))
         return 0
     print("用法：python distiller\\foldlib.py pending  # 夜间幂等守卫：游标后事件 vs 账本\n"
+          "      python distiller\\foldlib.py collect  # 收集时点行数快照 → _collect_cursor.json\n"
+          "      python distiller\\foldlib.py advance  # 按快照原子推进游标（第 8 步唯一合法方式）\n"
           "      python distiller\\foldlib.py sweep    # 遗忘清扫：open 超 %d 天未动 → dormant；\n"
           "                                           #   dormant 超 %d 天无活动 → 自动闭合"
           % (DORMANT_DAYS, DORMANT_CLOSE_DAYS))

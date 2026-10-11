@@ -31,7 +31,7 @@ THREAD = (
 
 FILES = {
     "persona/core.md": "# 内核\n- 做减法",
-    "persona/threads/DIGEST.md": "共1条 open（上限8）\n\n- [open] 甲线头摘要（10-01）\n",
+    "persona/threads/DIGEST.md": "共1条 open（上限12）\n\n- [open] 甲线头摘要（10-01）\n",
     "persona/threads/t1.yaml": THREAD,
     "persona/people.yaml": "people:\n  - name: 李念念\n    brief: 女友\n    relation: r\n",
     "persona/protocols.yaml": "protocols:\n  - id: adversarial-review\n    when: 对抗性审查\n    spec: 全链审查\n",
