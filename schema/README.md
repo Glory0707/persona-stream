@@ -43,6 +43,7 @@ JSONL，一行一事件。公共字段：`id`（12位hex）、`ts`（ISO8601 含
   - `DIGEST.md` 为 open 线头摘要（注入用），**只能由 foldlib.regen_digest 再生，禁止手工编辑**
 - `people.yaml`：人物关系图谱（`name / brief / relation / source / confidence`）——**brief** 为 ≤150 字单行速览，SessionStart 只注入 name+brief 索引（2026-09-10 起，完整 relation 证据原话按需读取；audit 校验 brief 必填与索引预算 4500 字）
 - `assets.yaml`：资料地图（2026-09-24 起）——`id / path / brief(≤80字单行) / evidence[]`，会话填表/找材料直接定位查证；只存位置与内容类别概述，不存资料正文；上限 12 条，归档进 `assets_archive.yaml`；path 失效由使用会话核实回写。折叠规则见 FOLD_RULES §10
+- 个人信息方法地图（可选部署惯例，本部署见 `docs/PERSONAL_INFO.md`）：涉及用户信息的介绍/简历/填表类任务的统一入口——只记"去哪找 + 怎么判新旧 + 口径怎么处理"，**不堆事实快照**（FOLD_RULES §-1 指针优先于快照）；由使用会话随发现随更新
 - `episodes/`：事件卡 `{date, title, what, motive, emotion(0-5), resolution}`，允许追加 `what_*` 补录节
 - `journal/YYYY-MM.md`：每日一问/周日五问的问答记录；`## 待折叠` 小节由夜间蒸馏消化后清空
 - `protocols.yaml`：口令协议（`id/when/spec/evidence[]`，§7 上限 12 条）

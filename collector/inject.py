@@ -46,8 +46,13 @@ FOOTER = ("【按需加载】完整人格档案位于 %s/persona/。"
           "各域策略 → policies/<域>.yaml；人物关系与人名 → people.yaml；"
           "用户用口令指事 → 先读 protocols.yaml 按既定流程执行；"
           "重大取舍与方向演变看 beliefs/；进行中的事看 threads/DIGEST.md。"
-          "近期相关事件已由【记忆召回】按当前目录自动注入；追溯更早历史/换关键词 → "
-          "`python %s/eval/search_events.py 「关键词」`（本地事件全文索引，FTS5）。"
+          "【渐进披露】档案是地图不是照片：注入只是入口，关于用户的更深信息顺指针逐层挖——"
+          "档案分片 → episodes/ 经历卡（同一事实以最新纠错为准）→ 事件流全文"
+          "（`python %s/eval/search_events.py 「关键词」`，先 build_index，中文≥3字）"
+          "→ 查无 = 游标之后的新事，问用户本人；"
+          "若部署有个人信息方法地图（docs/PERSONAL_INFO.md 惯例，见 schema/README.md），"
+          "涉及用户的介绍/简历/填表类任务先读它。"
+          "近期相关事件已由【记忆召回】按当前目录自动注入；"
           "档案未覆盖的方面按常规处理，不要臆测画像。") % (ROOT, ROOT)
 
 
