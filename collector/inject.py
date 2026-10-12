@@ -43,7 +43,7 @@ RECALL_NOISE = ("PERSONA_STREAM_DISTILLER", "<system-reminder>", "无人值守�
 # 按需加载尾注（固定文本；check_injection 验证时先剥离，避免示例词造成假命中）
 FOOTER = ("【按需加载】完整人格档案位于 %s/persona/。"
           "任务涉及对应情境时，先读相关分片再行动："
-          "各域策略 → policies/<域>.yaml；人物关系与人名 → people.yaml；"
+          "各域策略 → policies/<域>.yaml（写作类任务动笔前先读写作策略，如 policies/writing.yaml）；人物关系与人名 → people.yaml；"
           "用户用口令指事 → 先读 protocols.yaml 按既定流程执行；"
           "重大取舍与方向演变看 beliefs/；进行中的事看 threads/DIGEST.md。"
           "【渐进披露】档案是地图不是照片：注入只是入口，关于用户的更深信息顺指针逐层挖——"
