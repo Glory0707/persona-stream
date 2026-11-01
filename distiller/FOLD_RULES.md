@@ -82,10 +82,11 @@
 ## 3. 写路径纪律（硬约束）
 
 - 档案变更**只准**经 `distiller/foldlib.py`（append_detail / set_digest /
-  touch_thread / add_related / add_paths / invalidate_block / invalidate_rule /
-  regen_digest / sweep_threads / upsert_belief_version / ledger_append）。它负责写前查重、YAML 预检、
-  原子落盘、侧车锁与账本。**禁止临时脚本字符串切片**——历史上两次档案
-  YAML 损坏都由此而来。
+  touch_thread / add_related / add_paths / add_evidence / invalidate_block /
+  invalidate_rule / archive_thread / archive_blocks / regen_digest /
+  sweep_threads / upsert_belief_version / ledger_append）。它负责写前查重、
+  YAML 预检、原子落盘、侧车锁与账本。**禁止临时脚本字符串切片**——历史上
+  两次档案 YAML 损坏都由此而来。
 - 长文本字段一律 YAML 块标量（`|-`）：裸标量里的英文引号/冒号会炸整个文件，
   audit 的 `check_yaml` 会抓到，但别让它抓到。
 - 折叠账本 `data/fold_ledger.jsonl` 由 foldlib 自动记（add/update/prune/
@@ -142,3 +143,26 @@
   二选一：补折（变为被引用，自动从报告消失）或写排除行。audit_persona 以
   WARN 接力，裁决完应清零。历史教训：一整段 12 事件的会话在夜间任务自己
   打印的清单里仍被丢掉，而三道闸门无一报警——完整性必须有自己的网。
+
+## 7. 档案单写者守则（2026-10-16 起，纪律之外的机械闸）
+
+`persona\` 与完整性面（折叠账本 / 游标 / 写令牌本体）是**单写者面**：只由
+夜间蒸馏、月度挖掘与档案主本人的受控维护写入；其他任何会话一律只读。
+
+- **机械闸**：`collector/guard_write.py` 作为 PreToolUse hook 挂进会话——
+  未持写权的写操作（含用脚本/命令行改档案的间接路径）直接 deny，并在
+  `data/guard_write.log` 留一行事实供夜间巡检。输入异常一律放行：守则只拦
+  明确违规，不阻塞正常工作。
+- **钥匙**：`distiller/write_gate.py begin/end`（默认 12 小时 TTL 兜底）。
+  开写权是"我确实要写档案"的显式声明，每次开/关都记日志；夜间任务与月度
+  挖掘开工先 `begin --by nightly`、收尾（无论成败）`end`。
+- **例外面**：`persona/journal/`（问答任务写日记）与问题池 `questions_pool.md`
+  不受本守则限制；会话级钩子自身与采集器自然豁免（它们只写 data/ 原始层）。
+- **其他会话发现档案有错/缺/过时**：写进问题池或在自己的回复里说明，留给
+  夜间折叠——不要自己开写权，也不要用临时脚本改档案。
+- **夜间越权巡检**：上夜收尾已全部 commit，开工时 `git status --short persona`
+  若仍有未提交改动，即说明有非夜间会话写过档案——逐个核对内容与账本
+  （属实者补记账+补 evidence id，不属实者核销），并在汇报里点名。
+
+背景：立闸当日曾出现其他会话自行改写三处档案（未记账本、未写 evidence id、
+digest 超限）——纪律靠自觉，机械闸靠 deny；两者缺一不可。

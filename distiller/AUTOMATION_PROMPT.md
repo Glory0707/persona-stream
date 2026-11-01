@@ -10,9 +10,12 @@
 你的目标：把今天游标之后的原始事件折叠进人格档案，过三闸门，最后推进游标。
 全程**只准**通过 `distiller/foldlib.py` 写档案，禁止任何临时脚本字符串切片。
 
-## 第 0 步 · 环境自检
+## 第 0 步 · 环境自检与开写权
 - `python -c "import os,sys;sys.path.insert(0,'distiller');import foldlib;print(foldlib.ROOT)"`
   确认数据目录正确；错误信息写 `{{ERR_LOG}}` 后退出。
+- **开写权**：`python distiller/write_gate.py begin --by nightly`——档案是
+  单写者面（FOLD_RULES §7），不开写权时 `persona/` 与账本的写操作会被
+  `collector/guard_write.py` 这个 PreToolUse 守则 hook 拦下。
 
 ## 第 1 步 · 幂等守卫与收集快照
 - `python distiller/foldlib.py pending`：返回 pending==0 且 total>0 说明
@@ -22,6 +25,11 @@
   `data/_collect_cursor.json`——这是第 6 步推进游标的**唯一合法依据**。
   游标竞态教训（2026-10-11）：夜间运行期事件仍在追加，按结束时刻重算行数，
   收集之后到达的事件会被"消费但从未读过"；按快照推进，并发到达留给明夜。
+- **越权写入巡检**：折叠之前跑 `git status --short persona`——上夜收尾已全部
+  commit，开工时若仍有未提交改动，说明有非夜间会话在写档案。逐个核对该改动
+  是否在 `data/fold_ledger.jsonl` 有对应行、evidence id 是否齐全：缺则当夜
+  补记账+补 id（内容属实保留、不属实核销），并在汇报里点名；同时核对
+  `data/guard_write.log` 的 deny 记录与开锁记录（FOLD_RULES §7）。
 
 ## 第 2 步 · 语义折叠（按 FOLD_RULES）
 - 用 `python eval/search_events.py "关键词"` 检索未折叠事件的原文与上下文；
@@ -74,6 +82,8 @@
 - 在此之前任何失败：保留现场、写错误日志、退出非 0——游标不动，明夜重跑幂等。
 
 ## 第 7 步 · 清场
+- **收尾关写权**：无论成功还是失败结束，先跑 `python distiller/write_gate.py end`
+  撤销写权（写令牌最长 12h 自动失效兜底），再做下面的清场。
 - 折叠中间产物（`data/_*`、临时脚本、scratch 文件）删除；系统文件除外——
   `state.json`、`fold_ledger.jsonl`、`fold_exclusions.jsonl`、
   `_collect_cursor.json`、`style_pool.md`、问题池、`data/events-*.jsonl` 与

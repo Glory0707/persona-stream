@@ -4,22 +4,81 @@
     "enabled": true,
     "events": {
       "UserPromptSubmit": [
-        {"hooks": [{"type": "command", "command": "\"<PYTHON>\" \"<REPO>/collector/collect.py\" UserPromptSubmit", "timeoutMs": 5000}]}
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"<PYTHON>\" \"<REPO>/collector/collect.py\" UserPromptSubmit",
+              "timeoutMs": 5000
+            }
+          ]
+        }
       ],
       "Stop": [
-        {"hooks": [{"type": "command", "command": "\"<PYTHON>\" \"<REPO>/collector/collect.py\" Stop", "timeoutMs": 5000}]}
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"<PYTHON>\" \"<REPO>/collector/collect.py\" Stop",
+              "timeoutMs": 5000
+            }
+          ]
+        }
       ],
       "PermissionRequest": [
-        {"hooks": [{"type": "command", "command": "\"<PYTHON>\" \"<REPO>/collector/collect.py\" PermissionRequest", "timeoutMs": 5000}]}
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"<PYTHON>\" \"<REPO>/collector/collect.py\" PermissionRequest",
+              "timeoutMs": 5000
+            }
+          ]
+        }
       ],
       "PostToolUse": [
-        {"hooks": [{"type": "command", "command": "\"<PYTHON>\" \"<REPO>/collector/collect.py\" PostToolUse", "timeoutMs": 5000}]}
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"<PYTHON>\" \"<REPO>/collector/collect.py\" PostToolUse",
+              "timeoutMs": 5000
+            }
+          ]
+        }
       ],
       "PostToolUseFailure": [
-        {"hooks": [{"type": "command", "command": "\"<PYTHON>\" \"<REPO>/collector/collect.py\" PostToolUseFailure", "timeoutMs": 5000}]}
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"<PYTHON>\" \"<REPO>/collector/collect.py\" PostToolUseFailure",
+              "timeoutMs": 5000
+            }
+          ]
+        }
       ],
       "SessionStart": [
-        {"hooks": [{"type": "command", "command": "\"<PYTHON>\" \"<REPO>/collector/inject.py\"", "timeoutMs": 5000}]}
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"<PYTHON>\" \"<REPO>/collector/inject.py\"",
+              "timeoutMs": 5000
+            }
+          ]
+        }
+      ],
+      "PreToolUse": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"<PYTHON>\" \"<REPO>/collector/guard_write.py\"",
+              "timeoutMs": 5000
+            }
+          ]
+        }
       ]
     }
   }

@@ -6,6 +6,7 @@
 |---|---|---|
 | `UserPromptSubmit` / `Stop` / `PermissionRequest` / `PostToolUse` / `PostToolUseFailure` | `collector/collect.py <HookName>` | 全量保真采集（脱敏后追加进 `<PERSONA_HOME>/data/events-YYYYMMDD.jsonl`） |
 | `SessionStart` | `collector/inject.py` | 向新会话注入人格内核（additionalContext） |
+| `PreToolUse` | `collector/guard_write.py` | 档案单写者守则：拦截未持写权的档案写操作（deny 理由附替代路径） |
 
 采集器的设计底线：顶层 try/except 兜底、永远 exit 0、stdout 恒为空、无网络、
 预算 <100ms——它不可能拖垮你的会话；失败会静默写 `<data>/collector_err.log`。
@@ -28,6 +29,15 @@ payload 都是 stdin JSON（含 `session_id`/`cwd`/`prompt` 等字段）。适�
    你的平台若不支持 SessionStart 注入，可以改为在系统提示词里引用
    `persona/SNAPSHOT.md` 与 `persona/threads/DIGEST.md`，或手动运行
    `python -c "import json,sys;sys.path.insert(0,'collector');import inject;print(json.dumps({'additionalContext':inject.build_context()}))"`。
+
+## 单写者守则（可选但强烈建议）
+
+`persona/` 是单写者面：只有夜间蒸馏任务与档案主本人的受控维护能写。把
+`PreToolUse` 一行加进 hook 配置后，`collector/guard_write.py` 会 deny 其他
+会话的档案写操作；夜间任务开工 `python distiller/write_gate.py begin --by
+nightly` 开写权、收尾 `end` 撤销（12h TTL 兜底），开/关都记
+`data/guard_write.log` 供巡检。没配这个 hook 时守则退化为纯纪律——建议配上，
+纪律靠自觉、机械闸靠 deny。详见 distiller/FOLD_RULES.md §7。
 
 ## 数据目录：PERSONA_HOME
 
