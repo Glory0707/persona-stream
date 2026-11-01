@@ -23,6 +23,7 @@ THREADS_DIR = os.path.join(ROOT, "persona", "threads")
 PEOPLE = os.path.join(ROOT, "persona", "people.yaml")
 ASSETS = os.path.join(ROOT, "persona", "assets.yaml")
 PROTOCOLS = os.path.join(ROOT, "persona", "protocols.yaml")
+STATE = os.path.join(ROOT, "data", "state.json")
 
 _CODE_HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # 代码随仓走：distiller/eval 从代码根找，不随 PERSONA_HOME 数据目录漂移
 try:
@@ -293,6 +294,31 @@ def recall_section(cwd, hits=None):
     return "\n".join(out) if out else None
 
 
+def distill_heartbeat(state_path=None, today=None, stale_days=2):
+    """蒸馏心跳：夜间蒸馏停滞 ≥2 天时输出一行警示（注入层自监控面）。
+
+    背景：宿主自动化 2026-10-14/18/23~25 多次静默缺席——cron 不触发时系统里
+    没有任何东西会知道，要靠本人几天后自己发现。注入是每次会话必经的通道，
+    在这里检测游标停滞最便宜：state.json 的 updated 停滞即报警。
+    缺文件/解析失败/游标在未来/未停滞 → 一律返回 None（心跳只报状态，不添堵）。
+    """
+    state_path = state_path or STATE
+    try:
+        import datetime as _dt
+        today = today or _dt.date.today()
+        with open(state_path, encoding="utf-8") as f:
+            updated = str(json.load(f).get("updated") or "")
+        last = _dt.date.fromisoformat(updated.split("T")[0])
+        days = (today - last).days
+        if days >= stale_days:
+            return ("【蒸馏心跳】⚠ 夜间蒸馏已 %d 天未推进游标（上次 %s）——近几夜的"
+                    "事件未折叠；请检查宿主自动化是否正常触发，必要时手动跑一次"
+                    "夜间任务（幂等，重跑安全）。" % (days, updated.split("T")[0]))
+    except Exception:
+        pass
+    return None
+
+
 def build_context(cwd=None):
     """拼接注入全文（check_injection 与 main 共用；cwd 定向小节见 _project_section）。"""
     parts = []
@@ -342,6 +368,9 @@ def build_context(cwd=None):
     if rec:
         parts.append("【记忆召回】（按当前目录自动检索的近期相关事件，索引可能滞后；"
                      "换关键词/查更早用 FOOTER 的 search_events.py，≤%d字）\n%s" % (RECALL_BUDGET, rec))
+    beat = distill_heartbeat()
+    if beat:
+        parts.append(beat)
     parts.append(FOOTER)
     return "\n\n".join(parts)
 

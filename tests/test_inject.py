@@ -358,3 +358,42 @@ def test_recall_skips_build_when_index_fresh(tmp_path, monkeypatch):
                             "type": "prompt", "text": "demo 追加事件"}, ensure_ascii=False) + "\n")
     inject.recall_section(str(cwd))
     assert calls == [1]  # 事件比索引新 → 恰好构建一次
+
+
+# ---------- 蒸馏心跳（2026-11-01：宿主自动化静默缺席的自监控面） ----------
+def _write_state(tmp_path, updated):
+    p = tmp_path / "state.json"
+    p.write_text(json.dumps({"updated": updated, "files": {}}), encoding="utf-8")
+    return str(p)
+
+
+def test_heartbeat_warns_when_cursor_stale(tmp_path, monkeypatch):
+    import datetime as dt
+    sp = _write_state(tmp_path, "2026-10-25T02:10:33+08:00")
+    monkeypatch.setattr(inject, "STATE", sp)
+    msg = inject.distill_heartbeat(today=dt.date(2026, 11, 1))
+    assert msg and "7 天未推进游标" in msg and "2026-10-25" in msg
+
+
+def test_heartbeat_silent_when_fresh(tmp_path, monkeypatch):
+    import datetime as dt
+    monkeypatch.setattr(inject, "STATE",
+                        _write_state(tmp_path, "2026-10-31T23:00:00+08:00"))
+    assert inject.distill_heartbeat(today=dt.date(2026, 11, 1)) is None
+
+
+def test_heartbeat_silent_on_missing_or_bad_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(inject, "STATE", str(tmp_path / "none.json"))
+    assert inject.distill_heartbeat() is None
+    bad = tmp_path / "state.json"
+    bad.write_text("not-json{", encoding="utf-8")
+    monkeypatch.setattr(inject, "STATE", str(bad))
+    assert inject.distill_heartbeat() is None
+
+
+def test_heartbeat_in_build_context_when_stale(tmp_path, monkeypatch):
+    # 游标钉在远期过去 → 相对任何真实"今天"都停滞，用例不随时间失效
+    monkeypatch.setattr(inject, "STATE",
+                        _write_state(tmp_path, "2020-01-01T02:00:00+08:00"))
+    ctx = inject.build_context()
+    assert "蒸馏心跳" in ctx
