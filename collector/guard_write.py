@@ -66,11 +66,14 @@ def _persona_seg(path):
     p = _norm(path)
     if not p:
         return None
-    proj = _norm(PROJECT) + "/"          # d:/persona-stream/
+    proj = _norm(PROJECT) + "/"          # 数据家绝对路径（小写正斜杠形）
     if p.startswith(proj):
         p = p[len(proj):]
-    elif p.startswith("persona-stream/"):
-        p = p[len("persona-stream/"):]
+    else:
+        # 数据家目录名相对形（payload 有时以"仓目录/…"开头引用）：随部署自适应，不写死
+        home_seg = _norm(os.path.basename(os.path.normpath(PROJECT))) + "/"
+        if home_seg != "/" and p.startswith(home_seg):
+            p = p[len(home_seg):]
     if p.startswith("persona/"):
         return p[len("persona/"):]
     return None

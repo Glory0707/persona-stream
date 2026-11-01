@@ -17,19 +17,19 @@ except Exception:
 import re
 import secretscan  # 同目录模块：密钥模式与合成豁免的唯一来源
 
-SEP = os.sep
-
 
 def s(*codes):
     return "".join(map(chr, codes))
 
 
 BLACKLIST = [
-    "D:" + SEP + "persona-stream",                       # 私有仓本机路径
-    "C:" + SEP + "Users",                                # 用户目录
-    "/c" + SEP.lower() + "users/",                       # Git Bash 形态
+    # 盘符路径用拆码构造（源码里不得出现黑名单连续字面量——扫描自己时不能自证命中），
+    # 一律正斜杠形；匹配前被扫文本会做反斜杠→正斜杠归一，两平台同判
+    s(68, 58, 47, 112, 101, 114, 115, 111, 110, 97, 45, 115, 116, 114, 101, 97, 109),   # 私有仓本机路径
+    s(67, 58, 47, 85, 115, 101, 114, 115),                                              # 用户目录
+    s(47, 99, 47, 117, 115, 101, 114, 115, 47),                                         # Git Bash 形态
     s(76, 101, 110, 111, 118, 111),                      # 主机身份（拆码防自命中）
-    "Glory0707/persona-stream-pri" + "vate",             # 私有仓名
+    "Glory0707/persona-stream-pri" + "vate",             # 私有仓名（拼接防自命中）
     chr(21608) + chr(22885),                             # 作者真名（拆码构造，理由同上）
 ]
 
@@ -78,7 +78,10 @@ def main():
             text = text.replace(s, "")
         for name in secretscan.scan_text(text):
             hits.append("%s: 密钥形态（%s）" % (rel, name))
-        low = text.lower()
+        # 黑名单匹配前把反斜杠归一为正斜杠——2026-11-01 CI 教训：黑名单按 os.sep
+        # 构造时，盘符路径的正斜杠形态只有 Linux runner 能查到（Windows 本地扫
+        # 永远绿）；归一后两平台同判
+        low = text.lower().replace("\\", "/")
         for b in BLACKLIST:
             if b.lower() in low:
                 hits.append("%s: 本机/身份黑名单命中（%s…）" % (rel, b[:24]))
