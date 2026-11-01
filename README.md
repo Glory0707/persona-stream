@@ -145,7 +145,7 @@ plain text — tune it for other models freely.
 | `policies/<domain>.yaml` | situation → tendency rules, confidence, evidence; soft-invalidation | `invalidated:` keeps history |
 | `beliefs/<topic>.yaml` | versioned beliefs; contradictions recorded, not arbitrated | append-only versions |
 | `threads/*.yaml` | open lines of work; `related:` links, `paths:` for cwd targeting | 4-level lifecycle, 32 KB cap |
-| `threads/DIGEST.md` | ≤8 open threads, regenerated mechanically from thread files | hand-editing forbidden |
+| `threads/DIGEST.md` | ≤12 open threads, regenerated mechanically from thread files | hand-editing forbidden |
 | `people.yaml`, `assets.yaml` | one-line indexes injected; full evidence on demand | brief-length budgets |
 | `protocols.yaml` | agreed shorthand commands | evidence stripped at injection |
 | `episodes/`, `journal/` | dated event cards; daily-question journal | folded like everything else |
@@ -164,6 +164,14 @@ and colons broke real deployments twice before the rule existed.
   scans every tracked file in the repo as a second gate.
 - The fold ledger (`data/fold_ledger.jsonl`) records every fold with the
   evidence ids it consumed — deletion-by-rewrite is visible, not silent.
+- The persona layer is **single-writer by enforcement, not by convention**: a
+  PreToolUse hook (`collector/guard_write.py`) denies any write to `persona/`
+  or the integrity surfaces from a session that does not hold the write token
+  (`distiller/write_gate.py begin/end`, 12h TTL fallback). The nightly task
+  opens the gate when it starts and closes it when it leaves; every open/close
+  and every denial lands in `data/guard_write.log` for the nightly audit.
+  Sessions that spot an error in the archive report it to the pool instead of
+  fixing it themselves.
 - This repository's own demo *asserts* the negative case: synthetic data is
   scanned for real machine paths and real names, and the demo fails if any
   appear. (`eval/leak_scan.py` runs the same scan in CI.)
@@ -177,14 +185,16 @@ and colons broke real deployments twice before the rule existed.
 ```text
 collector/   collect.py (5 hook events → JSONL) · inject.py (SessionStart)
              backfill_rollout.py (aggregate report over host rollout logs)
+             guard_write.py (PreToolUse single-writer gate for persona/)
 distiller/   foldlib.py (the ONLY write path; pending · collect · advance ·
-             sweep) · FOLD_RULES.md · AUTOMATION_PROMPT.md · MINING_PROMPT.md
+             sweep) · write_gate.py (write-token key) · FOLD_RULES.md ·
+             AUTOMATION_PROMPT.md · MINING_PROMPT.md
 eval/        check_events · audit_persona · check_injection · build_index
              search_events · metrics · missed_sessions (fold-completeness net)
              backup · plot_kpi · leak_scan
 synthetic/   generate.py · distill_demo.py · demo.py   ← start here
 schema/      README.md — the data contract (authoritative)
-tests/       161 regression tests (pytest, no network, no real data)
+tests/       173 regression tests (pytest, no network, no real data)
 examples/    hook configuration examples
 ```
 
