@@ -403,6 +403,43 @@ def add_paths(path, dirs):
     return merged_new
 
 
+def add_evidence(path, evidence_ids, note="", ledger_path=None):
+    """evidence 字段补录（2026-10-17 立，越权写入巡检的配套写路径）。
+
+    场景：非夜间会话直接写入的块被夜间巡检核对属实后，补 id 与账本行——
+    内容不动，只把事件指针并进顶层 evidence 列表（去重、12-hex 校验）。
+    记账 action=update；返回本次新增 id 列表（全已存在则空列表、不记账）。
+    """
+    ids = [i for i in (evidence_ids or []) if isinstance(i, str) and EVID_RE.match(i)]
+    bad = [i for i in (evidence_ids or []) if not (isinstance(i, str) and EVID_RE.match(i))]
+    if bad:
+        raise LedgerError("evidence 含非法 id（须 12-hex）：%r" % bad[:3])
+    if not ids:
+        return []
+    with _write_lock(path):
+        s = _read(path)
+        m = re.search(r"^evidence: \[(.*?)\]", s, re.M | re.S)
+        if not m:
+            raise FoldLibError("文件缺顶层 evidence 行，不像线头档案：" + path)
+        have = re.findall(r"[0-9a-f]{12}", m.group(1))
+        add = [i for i in ids if i not in have]
+        if not add:
+            return []
+        merged = have + add
+        new_s = s[:m.start()] + "evidence: [" + ", ".join('"%s"' % i for i in merged) + "]" + s[m.end():]
+        if not _yaml_ok(new_s):
+            raise YamlVerifyError("evidence 补录后 YAML 无法解析：" + path)
+        _write_atomic(path, new_s)
+    try:
+        target = os.path.relpath(path, PERSONA).replace("\\", "/")
+    except ValueError:
+        target = os.path.basename(path)
+    ledger_append("update", target, (note or "evidence 补录（越权写入巡检）")[:120], add,
+                  old_summary="evidence %d 项" % len(have),
+                  new_summary="evidence %d 项" % len(merged), ledger_path=ledger_path)
+    return add
+
+
 def _set_list_field(s, field, values):
     # 单引号标量：Windows 路径的反斜杠在双引号里是非法转义（\U → YAML 报错）；
     # lambda 替换为字面量——re.sub 的字符串替换里反斜杠是转义炸弹
@@ -857,6 +894,65 @@ def archive_thread(thread_id, threads_dir=THREADS_DIR, archive_dir=ARCHIVE_DIR,
             os.remove(dst)            # 桩写失败 → 回收归档位，源文件完好
             raise
     return dst
+
+
+def archive_blocks(path, keep_last, archive_path, label="", ledger_path=None):
+    """早期块归档（2026-10-17 立，正文逼近 32KB 硬限时的受控减法）。
+
+    与 append_detail 的"超限报错逼当场合并"配套：把 detail 前段块整块迁入
+    _archive 归档文件（注释头 + detail 块标量，永不删除），原位留一行归档指针块
+    `；【早期块归档】…`，只保留最近 keep_last 块。块用 _segments 同一口径切分，
+    不做裸字符串 replace。记账 action=prune；返回 (迁出块数, 归档文件路径)。
+    """
+    with _write_lock(path):
+        s = _read(path)
+        lines, ranges, _ev = _segments(s)
+        if len(ranges) <= keep_last:
+            raise FoldLibError("无块可归档（%d 块 ≤ 保留 %d）：%s"
+                               % (len(ranges), keep_last, os.path.basename(path)))
+        moved = ranges[:len(ranges) - keep_last]
+        if "【早期块归档】" in "".join(lines[moved[0][0]:moved[0][1]]):
+            raise FoldLibError("首个迁出块是归档指针（已归档过），拒绝重复归档："
+                               + os.path.basename(path))
+        if os.path.exists(archive_path):
+            raise BlockExistsError("归档位已存在同名文件：" + archive_path)
+        old_bytes = len(s.encode("utf-8"))
+        blocks = ["".join(lines[st:en]).strip("\n") for st, en in moved]
+        day = _date.today().isoformat()
+        tid = front_field(s, "id") or os.path.basename(path)[:-5]
+        arch = ("# %s 早期块归档（%s 夜间压缩：正文超 32KB 硬限，前 %d 块迁此，永不删除）\n"
+                "detail: |-\n%s\n" % (tid, day, len(blocks), "\n".join(blocks)))
+        if not _yaml_ok(arch):
+            raise YamlVerifyError("归档文件 YAML 校验失败：" + archive_path)
+        # 源文件：迁出区（首块行 → 末块行）整体替换为归档指针块
+        p0 = sum(len(x) for x in lines[:moved[0][0]])
+        p1 = sum(len(x) for x in lines[:moved[-1][1]])
+        pointer = ("  ；【早期块归档】%s（%d 块）迁 %s，按需读取。\n"
+                   % (label or "前段正文块",
+                      len(blocks),
+                      os.path.relpath(archive_path, os.path.dirname(os.path.dirname(path))).replace("\\", "/")))
+        new_s = s[:p0] + pointer + s[p1:]
+        if len(new_s.encode("utf-8")) >= old_bytes:
+            raise FoldLibError("归档后体积未下降，拒绝写入：" + os.path.basename(path))
+        if not _yaml_ok(new_s):
+            raise YamlVerifyError("早期块归档后 YAML 无法解析：" + os.path.basename(path))
+        os.makedirs(os.path.dirname(archive_path), exist_ok=True)
+        _write_atomic(archive_path, arch)
+        try:
+            _write_atomic(path, new_s)
+        except Exception:
+            os.remove(archive_path)  # 源写失败 → 回收归档位，源文件完好
+            raise
+    try:
+        target = os.path.relpath(path, PERSONA).replace("\\", "/")
+    except ValueError:
+        target = os.path.basename(path)
+    ledger_append("prune", target,
+                  ("早期块归档 _archive/%s" % os.path.basename(archive_path))[:120],
+                  [],
+                  old_summary="%d 块 %d 字节" % (len(blocks), old_bytes),
+                  new_summary="末 %d 块 + 归档指针" % keep_last, ledger_path=ledger_path)
+    return len(blocks), archive_path
 
 
 def sweep_threads(threads_dir=THREADS_DIR, day=None, dormant_days=DORMANT_DAYS,

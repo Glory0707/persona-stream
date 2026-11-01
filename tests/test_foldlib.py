@@ -661,3 +661,54 @@ def test_advance_rejects_line_regression(tmp_path):
         json.dumps({"collected_at": "t", "files": {"events-20261011.jsonl": 2}}), encoding="utf-8")
     with pytest.raises(foldlib.FoldLibError):
         foldlib.advance_cursor(state_path=str(d / "state.json"), data_dir=str(d))
+
+
+# ---------- 巡检补录 / 早期块归档（2026-10-17：越权写入巡检配套写路径） ----------
+
+def _ledger_rows(tmp_path):
+    p = tmp_path / "auto-ledger.jsonl"
+    if not p.exists():
+        return []
+    return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+
+def test_add_evidence_merges_dedups_and_ledgers(tmp_path):
+    body = _thread("t1").replace("evidence: []", 'evidence: ["aaaaaaaaaaaa"]')
+    f = _mk(tmp_path, {"t1.yaml": body}) / "t1.yaml"
+    got = foldlib.add_evidence(str(f), ["bbbbbbbbbbbb", "aaaaaaaaaaaa"])
+    assert got == ["bbbbbbbbbbbb"]                       # 去重、只报新增
+    assert foldlib.add_evidence(str(f), ["bbbbbbbbbbbb"]) == []  # 全已存在 → 空、不记账
+    obj = yaml.safe_load(f.read_text(encoding="utf-8"))
+    assert set(obj["evidence"]) == {"aaaaaaaaaaaa", "bbbbbbbbbbbb"}
+    rows = _ledger_rows(tmp_path)
+    assert len(rows) == 1 and rows[0]["action"] == "update"
+    assert rows[0]["event_ids"] == ["bbbbbbbbbbbb"]
+
+
+def test_add_evidence_rejects_bad_ids_and_missing_field(tmp_path):
+    f = _mk(tmp_path, {"t1.yaml": _thread("t1")}) / "t1.yaml"
+    with pytest.raises(foldlib.LedgerError):
+        foldlib.add_evidence(str(f), ["short"])
+    p = tmp_path / "no_ev.yaml"
+    p.write_text("# x\nid: x\nstatus: open\ndetail: |-\n  ；【块】x\n", encoding="utf-8")
+    with pytest.raises(foldlib.FoldLibError):
+        foldlib.add_evidence(str(p), ["aaaaaaaaaaaa"])
+
+
+def test_archive_blocks_moves_prefix_leaves_pointer(tmp_path):
+    detail = "\n".join("  ；【9-%d：块%d】%s" % (i, i, "内容甲" * 40) for i in (1, 2, 3, 4))
+    f = _mk(tmp_path, {"t1.yaml": _thread("t1", detail=detail)}) / "t1.yaml"
+    arch = str(tmp_path / "threads" / "_archive" / "t1-early.yaml")
+    n, dst = foldlib.archive_blocks(str(f), keep_last=1, archive_path=arch, label="前段块")
+    assert n == 3 and dst == arch
+    obj = yaml.safe_load(f.read_text(encoding="utf-8"))
+    assert "块4" in obj["detail"] and "块1" not in obj["detail"]
+    assert "【早期块归档】" in obj["detail"]
+    aobj = yaml.safe_load(open(arch, encoding="utf-8").read())
+    assert "块1" in aobj["detail"] and "块4" not in aobj["detail"]
+    rows = _ledger_rows(tmp_path)
+    assert rows[-1]["action"] == "prune" and "t1-early.yaml" in rows[-1]["block_key"]
+    with pytest.raises(foldlib.FoldLibError):  # 剩余块数 ≤ keep_last 时拒绝
+        foldlib.archive_blocks(str(f), keep_last=2, archive_path=str(tmp_path / "x.yaml"))
+    with pytest.raises(foldlib.FoldLibError):  # 迁出区含归档指针时拒绝（防重复归档）
+        foldlib.archive_blocks(str(f), keep_last=1, archive_path=str(tmp_path / "y.yaml"))
