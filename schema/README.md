@@ -13,6 +13,8 @@ JSONL，一行一事件。公共字段：`id`（12位hex）、`ts`（ISO8601 含
 | `permissionrequest` / `posttooluse` / `posttoolusefailure` | `payload{}`（全量，含 `tool_name/tool_input/tool_result/transcript_path`、`rollout` 引用） | 工具观察记录，不截断不砍列表 |
 | `git_commit` | `author`、`hash`、`subject`、`src` | git 提交事件（backfill 与实时并存） |
 
+**第二来源（2026-11-03 起，本人令“蒸馏范围扩展到 DeepSeek harness 桌面端”）**：`collector/collect_dsh.py` 把 `~/.dsh/sessions` 的会话日志（zstd 压缩、append-only 规范 generation）增量写成 `data/events-dsh-YYYYMMDD.jsonl`，复用 `prompt`/`stop` 两型——`hook` 为 `DSHUserPrompt`/`DSHStop`，`session` 为 `session-<uuid>`；`stop.reply` 为 `{finish, text, reasoning, tool_calls:[{name,arguments}], source:"dsh-session-log", turn}`（每轮 `turn/end` 一条，无助手消息的 aborted/error 轮也记、text 为空）。系统/开发者/上下文消息、工具结果、子智能体（delegationDepth>0）与 seed 会话不采集。**夜间蒸馏与月度思想挖掘开头都会先跑该采集器**（每夜先于 `pending`，保证没有新 ZCode 事件时 DSH 也照常入库）。源侧游标 `data/_dsh_cursor.json`（每会话 version+last_seq+已发 id 集合；id=`sha1("dsh:<session>:<kind>:<key>")[:12]`），与 `state.json` 的消费游标是两层。
+
 ## 2. 噪声策略（2026-09-09 起：打标不丢弃，判断归 LLM）
 
 | 输入示例 | 启发式标签 | 处理 |
@@ -64,6 +66,7 @@ JSONL，一行一事件。公共字段：`id`（12位hex）、`ts`（ISO8601 含
 - `eval/kpi.jsonl` 每行须带 `kind`：`nightly`(夜间折叠，signals=折叠事件数) / `mining`(离线深挖，signals=实际折叠引用的事件数、原始扫描量写 note) / `maint`(工程维护)——趋势图只统计 nightly；每行须含 date/kind/signals/pruned，2026-10-06 起 nightly 行还须含 `coverage`/`backlink`（`eval/metrics.py` 产出），rate 须与 corrections/signals 相符，同日同 signals 的 nightly 重复行会被自检判 ERROR。
 - 质检脚本：`eval/audit_persona.py`（档案+全仓库密钥扫描）、`eval/check_events.py`（原始事件流完整性/密钥兜底/游标一致性）、`eval/backup.py`（每周备份+sha256 清单+保留 8 代）。
 - `collector_err.log`（采集错误，超 256KB 自动轮转一代）、`distill_err.log`（蒸馏错误）。`data/` 整体 gitignore；蒸馏中间产物（`data/_*`、临时脚本）折叠后即删（见 AUTOMATION_PROMPT 第 6 步）。
+- **DSH 源侧游标 `data/_dsh_cursor.json`**（2026-11-03 起）：DeepSeek Harness 桌面端每个会话的 generation 版本、seq 水位与已发事件 id 集合；与 `state.json` 的消费游标是两层——先由 `collector/collect_dsh.py` 从源日志增量产出事件流，再由夜间任务按 `state.json` 消费。损坏/不可读按采集失败处理（不推进消费游标）。
 
 ## 7. 长文本字段的 YAML 写法（硬约束）
 

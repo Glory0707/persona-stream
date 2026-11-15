@@ -289,10 +289,6 @@ def append_detail(path, block, evidence_ids, ledger_path=None):
         m_next = re.search(r"\n(?=[A-Za-z_][A-Za-z0-9_]*:)", s[d0 + 1:])
         ins = (d0 + 1 + m_next.start()) if m_next else len(s)
         new_s = s[:ins] + "\n" + indented + s[ins:]
-        if len(new_s.encode("utf-8")) > THREAD_BODY_LIMIT:
-            raise ThreadBodyLimitExceeded(path, blocks_of(path))
-        if not _yaml_ok(new_s):
-            raise YamlVerifyError("写入后 YAML 无法解析，已放弃（%s）" % os.path.basename(path))
         m = re.search(r"^evidence: \[(.*?)\]", new_s, re.M | re.S)  # 锚定顶层行，防 detail 内文本劫持
         have = re.findall(r"[0-9a-f]{12}", m.group(1)) if m else []
         add = [i for i in (evidence_ids or [])
@@ -300,6 +296,12 @@ def append_detail(path, block, evidence_ids, ledger_path=None):
         have += add
         if m:
             new_s = new_s[:m.start()] + "evidence: [" + ", ".join('"%s"' % i for i in have) + "]" + new_s[m.end():]
+        # 限长检查放在 evidence 合并之后（2026-11-13 修正：此前 44 个新 id 未计入，
+        # 写盘后实际超出 32KB 硬限，导致下一次 append 才报错）
+        if len(new_s.encode("utf-8")) > THREAD_BODY_LIMIT:
+            raise ThreadBodyLimitExceeded(path, blocks_of(path))
+        if not _yaml_ok(new_s):
+            raise YamlVerifyError("写入后 YAML 无法解析，已放弃（%s）" % os.path.basename(path))
         _write_atomic(path, new_s)
     _ledger_add(path, key, add, key[:120], ledger_path)
     return add
@@ -953,6 +955,78 @@ def archive_blocks(path, keep_last, archive_path, label="", ledger_path=None):
                   old_summary="%d 块 %d 字节" % (len(blocks), old_bytes),
                   new_summary="末 %d 块 + 归档指针" % keep_last, ledger_path=ledger_path)
     return len(blocks), archive_path
+
+
+def archive_detail_base(path, archive_path, label="", ledger_path=None):
+    """detail 基块归档（2026-11-09 立，补 archive_blocks 的盲区）。
+
+    archive_blocks 只切 【 头块，动不了 detail 字段本身的基标量——当基块本身
+    就是 18KB 单行大块时（polymer 9-22 前主线），再归档路径被归档指针挡住、正文
+    又超 32KB 硬限，append_detail 必报错。本原语把 detail 标量整体迁入 _archive
+    文件（注释头 + `detail: |-` 块标量，永不删除），原位留一行指针标量；块用
+    行级切片识别字段范围，不做裸 replace。记账 action=prune。
+    返回 (迁出字节数, 归档文件路径)。
+    """
+    with _write_lock(path):
+        s = _read(path)
+        if os.path.exists(archive_path):
+            raise BlockExistsError("归档位已存在同名文件：" + archive_path)
+        m = re.search(r"^detail:[ \t]*(?:\|[-+]?)?[ \t]*(.*)$", s, re.M)
+        if not m:
+            raise FoldLibError("找不到 detail 字段：" + path)
+        line_end = s.index("\n", m.start()) if "\n" in s[m.start():] else len(s)
+        is_block = bool(re.match(r"^detail:[ \t]*\|[-+]?[ \t]*$", s[m.start():line_end]))
+        if is_block:
+            # 块标量：吞掉后续所有行首缩进 ≥2 的行
+            pos = line_end + 1
+            body = []
+            while pos < len(s):
+                nxt = s.find("\n", pos)
+                nxt = len(s) if nxt < 0 else nxt
+                ln = s[pos:nxt]
+                if ln.strip() and not ln.startswith("  "):
+                    break
+                body.append(ln)
+                pos = nxt + 1
+            value_raw = "\n".join(body).rstrip()
+            end = pos - 1 if body else line_end
+        else:
+            value_raw = m.group(1).strip()
+            end = line_end
+            if not value_raw:
+                raise FoldLibError("detail 为空，无需归档：" + path)
+        old_bytes = len(s.encode("utf-8"))
+        day = _date.today().isoformat()
+        tid = front_field(s, "id") or os.path.basename(path)[:-5]
+        indented = "\n".join("  " + ln if ln.strip() else "" for ln in value_raw.splitlines())
+        arch = ("# %s 基块归档（%s 夜间压缩：detail 基块整体迁此，永不删除，按需读取）\n"
+                "detail: |-\n%s\n" % (tid, day, indented))
+        if not _yaml_ok(arch):
+            raise YamlVerifyError("归档文件 YAML 校验失败：" + archive_path)
+        rel = os.path.relpath(archive_path, os.path.dirname(os.path.dirname(path))).replace("\\", "/")
+        pointer = "detail: 见 %s（%s，基块原文永不删除，按需读取）" % (
+            rel, label or "早期主线")
+        new_s = s[:m.start()] + pointer + s[end:]
+        if len(new_s.encode("utf-8")) >= old_bytes:
+            raise FoldLibError("归档后体积未下降，拒绝写入：" + os.path.basename(path))
+        if not _yaml_ok(new_s):
+            raise YamlVerifyError("基块归档后 YAML 无法解析：" + os.path.basename(path))
+        os.makedirs(os.path.dirname(archive_path), exist_ok=True)
+        _write_atomic(archive_path, arch)
+        try:
+            _write_atomic(path, new_s)
+        except Exception:
+            os.remove(archive_path)
+            raise
+    try:
+        target = os.path.relpath(path, PERSONA).replace("\\", "/")
+    except ValueError:
+        target = os.path.basename(path)
+    ledger_append("prune", target,
+                  ("detail 基块归档 _archive/%s" % os.path.basename(archive_path))[:120],
+                  [], old_summary="基块 %d 字节" % old_bytes,
+                  new_summary="指针 + 归档文件", ledger_path=ledger_path)
+    return old_bytes, archive_path
 
 
 def sweep_threads(threads_dir=THREADS_DIR, day=None, dormant_days=DORMANT_DAYS,
