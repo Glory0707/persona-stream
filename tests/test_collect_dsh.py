@@ -13,13 +13,16 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
-import zstandard as zstd
 
 ROOT = __import__("pathlib").Path(__file__).resolve().parent.parent
 if not (ROOT / "collector" / "collect_dsh.py").exists():
-    # collect_dsh.py 是实例层模块（含 DSH 实机路径，sync_open BYTE_FILES 有意不收）：
-    # 公开仓没有该文件，整文件跳过；私有仓照常执行。
+    # collect_dsh.py 是实例层模块（含 DSH 实机路径，sync_open BYTE_FILES 有意不收），
+    # 其 zstandard 依赖也只存在于私有环境——公开仓必须在 import zstandard 之前
+    # 整文件跳过，否则模块顶层 ImportError（2026-11-15 CI 实锤）。私有仓照常执行。
     pytest.skip("collect_dsh.py 为实例层模块，公开仓无此文件", allow_module_level=True)
+
+import zstandard as zstd  # noqa: E402 —— 公开仓已在上方跳过；私有仓环境可用
+
 _spec = importlib.util.spec_from_file_location("collect_dsh", ROOT / "collector" / "collect_dsh.py")
 collect_dsh = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(collect_dsh)
